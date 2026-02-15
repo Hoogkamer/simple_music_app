@@ -96,25 +96,36 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             updateCurrentTrackInfo()
-            saveCurrentPlaybackState()
+            viewModelScope.launch { saveCurrentPlaybackState() }
         }
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
             _shuffleEnabled.value = shuffleModeEnabled
+            viewModelScope.launch { saveCurrentPlaybackState() }
         }
 
         override fun onRepeatModeChanged(repeatMode: Int) {
             _repeatEnabled.value = repeatMode == Player.REPEAT_MODE_ALL
+            viewModelScope.launch { saveCurrentPlaybackState() }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_READY) {
                 _durationMs.value = mediaController?.duration ?: 0L
             }
+            if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) {
+                viewModelScope.launch { saveCurrentPlaybackState() }
+            }
         }
     }
 
     private fun startPositionUpdates() {
+        viewModelScope.launch {
+            while (true) {
+                delay(30_000) // Periodic save every 30 seconds as safety net
+                saveCurrentPlaybackState()
+            }
+        }
         viewModelScope.launch {
             while (true) {
                 delay(500)
@@ -140,7 +151,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     // --- State management ---
     fun selectState(stateId: Int) {
         viewModelScope.launch {
-            // Save current state before switching
+            // Ensure previous state is saved ATOMICALLY before switching
             saveCurrentPlaybackState()
 
             val state = repository.getStateById(stateId) ?: return@launch
@@ -225,7 +236,13 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     // --- Playback controls ---
     fun playPause() {
         mediaController?.let { controller ->
-            if (controller.isPlaying) controller.pause() else controller.play()
+            if (controller.isPlaying) {
+                controller.pause()
+                // Save immediately on pause
+                viewModelScope.launch { saveCurrentPlaybackState() }
+            } else {
+                controller.play()
+            }
         }
     }
 
@@ -294,21 +311,19 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // --- Persistence ---
-    fun saveCurrentPlaybackState() {
-        viewModelScope.launch {
-            val stateId = _activeStateId.value ?: return@launch
-            val state = repository.getStateById(stateId) ?: return@launch
-            val controller = mediaController ?: return@launch
+    suspend fun saveCurrentPlaybackState() {
+        val stateId = _activeStateId.value ?: return
+        val state = repository.getStateById(stateId) ?: return
+        val controller = mediaController ?: return
 
-            repository.updateState(
-                state.copy(
-                    currentTrackIndex = controller.currentMediaItemIndex,
-                    currentPositionMs = controller.currentPosition,
-                    shuffleEnabled = controller.shuffleModeEnabled,
-                    repeatEnabled = controller.repeatMode == Player.REPEAT_MODE_ALL
-                )
+        repository.updateState(
+            state.copy(
+                currentTrackIndex = controller.currentMediaItemIndex,
+                currentPositionMs = controller.currentPosition,
+                shuffleEnabled = controller.shuffleModeEnabled,
+                repeatEnabled = controller.repeatMode == Player.REPEAT_MODE_ALL
             )
-        }
+        )
     }
 
     override fun onCleared() {
