@@ -1,0 +1,53 @@
+# Gradle files
+.gradle/
+build/
+
+# Kotlin / Java
+*.class
+*.log
+*.ctxt
+*.jar
+*.war
+*.ear
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+/out/
+.navigation/
+
+# Android
+capture/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.ap_
+*.dex
+*.class
+
+# Local configuration
+local.properties
+.DS_Store
+
+# Generated files
+app/build/
+gradle/build/
+
+# Package Management
+.bundle/
+vendor/
+
+# Others
+Captures/
+.externalNativeBuild/
+.cxx/
+/captures/
+/asset_cache/
+/build/
+
+# NDk
+obj/
+libs/
