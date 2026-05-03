@@ -21,22 +21,29 @@ class PodcastRepository(private val context: android.content.Context, private va
         return dao.getEpisodesForChannel(channelId)
     }
 
-    fun getDownloadedEpisodes(): Flow<List<PodcastEpisode>> {
-        return dao.getDownloadedEpisodes()
+    fun getRecentEpisodes(): Flow<List<PodcastEpisode>> {
+        val twoWeeksAgo = System.currentTimeMillis() - (14L * 24 * 60 * 60 * 1000)
+        return dao.getRecentEpisodes(twoWeeksAgo)
     }
 
-    suspend fun refreshFeed(channelId: Int, feedUrl: String) {
-        withContext(Dispatchers.IO) {
+    fun getEpisodeFlowById(id: Int): Flow<PodcastEpisode?> {
+        return dao.getEpisodeFlowById(id)
+    }
+
+    suspend fun refreshFeed(channelId: Int, feedUrl: String): String? {
+        return withContext(Dispatchers.IO) {
             try {
                 val inputStream = URL(feedUrl).openStream()
-                val episodes = parser.parse(inputStream, channelId)
+                val (title, episodes) = parser.parse(inputStream, channelId)
                 
                 // Insert new episodes (IGNORE on conflict ensures we don't overwrite played state)
                 episodes.forEach { episode ->
                     dao.insertEpisode(episode)
                 }
+                title
             } catch (e: Exception) {
                 e.printStackTrace()
+                null
             }
         }
     }
@@ -66,10 +73,24 @@ class PodcastRepository(private val context: android.content.Context, private va
 
     suspend fun markAsPlayed(episode: PodcastEpisode) {
         withContext(Dispatchers.IO) {
-            dao.updateEpisode(episode.copy(isFinished = true))
-            if (episode.isDownloaded) {
-                deleteEpisodeFile(episode)
+            // First, delete the file if it exists
+            episode.localPath?.let { path ->
+                val file = File(path)
+                if (file.exists()) file.delete()
             }
+            // Then update the DB in one go to avoid race conditions
+            dao.updateEpisode(episode.copy(
+                isFinished = true,
+                localPath = null,
+                downloadStatus = PodcastEpisode.STATUS_IDLE,
+                downloadProgress = 0
+            ))
+        }
+    }
+
+    suspend fun markAsUnplayed(episode: PodcastEpisode) {
+        withContext(Dispatchers.IO) {
+            dao.updateEpisode(episode.copy(isFinished = false))
         }
     }
 
@@ -82,7 +103,10 @@ class PodcastRepository(private val context: android.content.Context, private va
                 isFinished = true
             }
 
-            val updated = episode.copy(playbackPositionMs = positionMs, durationMs = durationMs, isFinished = isFinished)
+            // Keep as finished if already finished, or if auto-finish triggered
+            val finalFinished = episode.isFinished || isFinished
+
+            val updated = episode.copy(playbackPositionMs = positionMs, durationMs = durationMs, isFinished = finalFinished)
             dao.updateEpisode(updated)
             
             if (isFinished && updated.isDownloaded) {
@@ -102,7 +126,7 @@ class PodcastRepository(private val context: android.content.Context, private va
     suspend fun markAllAsPlayed(channelId: Int) {
         withContext(Dispatchers.IO) {
             val episodes = dao.getEpisodesForChannel(channelId).first()
-            episodes.forEach { markAsPlayed(it) }
+            episodes.filter { !it.isDownloaded && !it.isDownloading && !it.isQueued }.forEach { markAsPlayed(it) }
         }
     }
 

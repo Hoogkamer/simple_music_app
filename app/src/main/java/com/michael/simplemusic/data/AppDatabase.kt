@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 
-@Database(entities = [AudioChannel::class, PodcastEpisode::class, AppConfig::class], version = 11, exportSchema = false)
+@Database(entities = [AudioChannel::class, PodcastEpisode::class, AppConfig::class], version = 12, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun audioChannelDao(): AudioChannelDao

@@ -20,11 +20,8 @@ import com.michael.simplemusic.podcast.PodcastRepository
 import com.michael.simplemusic.scanner.AudioFile
 import com.michael.simplemusic.scanner.FolderScanner
 import com.michael.simplemusic.service.MusicService
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.net.URL
 import java.net.URLEncoder
 
@@ -47,8 +44,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var mediaController: MediaController? = null
     private var podcastEpisodesJob: kotlinx.coroutines.Job? = null
-    private val _activePodcastEpisode = MutableStateFlow<PodcastEpisode?>(null)
-    val activePodcastEpisode: StateFlow<PodcastEpisode?> = _activePodcastEpisode.asStateFlow()
+
     private var isRefreshing = false
 
     // --- Exposed state ---
@@ -81,7 +77,21 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val _podcastEpisodes = MutableStateFlow<List<PodcastEpisode>>(emptyList())
     val podcastEpisodes: StateFlow<List<PodcastEpisode>> = _podcastEpisodes.asStateFlow()
 
-    val downloadedEpisodes = podcastRepository.getDownloadedEpisodes()
+    private val _pendingMarkPlayed = MutableStateFlow<Set<Int>>(emptySet())
+    val pendingMarkPlayed: StateFlow<Set<Int>> = _pendingMarkPlayed.asStateFlow()
+
+    private val _activeEpisodeId = MutableStateFlow<Int?>(null)
+    val activeEpisodeId: StateFlow<Int?> = _activeEpisodeId.asStateFlow()
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val activeEpisode: StateFlow<PodcastEpisode?> = _activeEpisodeId
+        .flatMapLatest { id ->
+            if (id == null) kotlinx.coroutines.flow.flowOf(null)
+            else podcastRepository.getEpisodeFlowById(id)
+        }
+        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), null)
+
+    val recentEpisodes = podcastRepository.getRecentEpisodes()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _isPlaying = MutableStateFlow(false)
@@ -193,7 +203,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                         _currentPositionMs.value = pos
                         if (dur > 0) _durationMs.value = dur
                         
-                        _activePodcastEpisode.value?.let { episode ->
+                        activeEpisode.value?.let { episode ->
                             podcastRepository.updatePlaybackPosition(episode, pos, dur)
                         }
                     }
@@ -220,7 +230,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun selectChannel(channelId: Int) {
         viewModelScope.launch {
             if (!isRefreshing) saveCurrentPlaybackState()
-            _activePodcastEpisode.value = null // Clear active episode if switching channels
+            _activeEpisodeId.value = null // Clear active episode if switching channels
             val channel = repository.getChannelById(channelId) ?: return@launch
             repository.updateChannel(channel.copy(lastPlayedTime = System.currentTimeMillis()))
             _activeChannelId.value = channelId
@@ -342,9 +352,13 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun createChannel(name: String, type: ChannelType = ChannelType.FOLDER, streamUrl: String? = null) {
         viewModelScope.launch {
-            val id = repository.insertChannel(AudioChannel(name = name, type = type, streamUrl = streamUrl))
+            val initialName = if (type == ChannelType.PODCAST) "Loading..." else name
+            val id = repository.insertChannel(AudioChannel(name = initialName, type = type, streamUrl = streamUrl))
             if (type == ChannelType.PODCAST && streamUrl != null) {
-                podcastRepository.refreshFeed(id.toInt(), streamUrl)
+                val title = podcastRepository.refreshFeed(id.toInt(), streamUrl)
+                if (!title.isNullOrBlank()) {
+                    repository.updateChannel(repository.getChannelById(id.toInt())?.copy(name = title) ?: return@launch)
+                }
             }
             selectChannel(id.toInt())
         }
@@ -379,6 +393,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val channel = repository.getChannelById(channelId) ?: return@launch
             repository.updateChannel(channel.copy(streamUrl = url))
+            if (channel.type == ChannelType.PODCAST) {
+                val title = podcastRepository.refreshFeed(channelId, url)
+                if (!title.isNullOrBlank()) {
+                    repository.updateChannel(repository.getChannelById(channelId)?.copy(name = title) ?: return@launch)
+                }
+            }
             if (_activeChannelId.value == channelId) {
                 selectChannel(channelId)
             }
@@ -415,7 +435,23 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun downloadEpisode(episode: PodcastEpisode) = viewModelScope.launch { podcastRepository.downloadEpisode(episode) }
     fun deleteEpisodeFile(episode: PodcastEpisode) = viewModelScope.launch { podcastRepository.deleteEpisodeFile(episode) }
+    fun markAsPlayedWithUndo(episode: PodcastEpisode) {
+        viewModelScope.launch {
+            _pendingMarkPlayed.value = _pendingMarkPlayed.value + episode.id
+            delay(5000)
+            if (episode.id in _pendingMarkPlayed.value) {
+                podcastRepository.markAsPlayed(episode)
+                _pendingMarkPlayed.value = _pendingMarkPlayed.value - episode.id
+            }
+        }
+    }
+
+    fun undoMarkAsPlayed(episodeId: Int) {
+        _pendingMarkPlayed.value = _pendingMarkPlayed.value - episodeId
+    }
+
     fun markEpisodeAsPlayed(episode: PodcastEpisode) = viewModelScope.launch { podcastRepository.markAsPlayed(episode) }
+    fun markEpisodeAsUnplayed(episode: PodcastEpisode) = viewModelScope.launch { podcastRepository.markAsUnplayed(episode) }
 
     fun setPodcastFeed(url: String) {
         viewModelScope.launch {
@@ -429,9 +465,13 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { configDao.saveConfig(update(_appConfig.value)) }
     }
 
+    fun setActiveEpisode(episode: PodcastEpisode?) {
+        _activeEpisodeId.value = episode?.id
+    }
+
     fun playPodcastEpisode(episode: PodcastEpisode) {
         mediaController?.let { controller ->
-            _activePodcastEpisode.value = episode
+            setActiveEpisode(episode)
             val uri = episode.localPath ?: episode.streamUrl
             val item = MediaItem.Builder()
                 .setMediaId(episode.id.toString())

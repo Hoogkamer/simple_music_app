@@ -1,6 +1,7 @@
 package com.michael.simplemusic.ui
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -21,6 +22,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -69,16 +71,16 @@ fun PlayerScreen(
     val durationMs by viewModel.durationMs.collectAsStateWithLifecycle()
     val audioFiles by viewModel.audioFiles.collectAsStateWithLifecycle()
     val podcastEpisodes by viewModel.podcastEpisodes.collectAsStateWithLifecycle()
-    val downloadedEpisodes by viewModel.downloadedEpisodes.collectAsStateWithLifecycle()
+    val recentEpisodes by viewModel.recentEpisodes.collectAsStateWithLifecycle()
     val podcastView by viewModel.podcastView.collectAsStateWithLifecycle()
-    val activePodcastEpisode by viewModel.activePodcastEpisode.collectAsStateWithLifecycle()
+    val activePodcastEpisode by viewModel.activeEpisode.collectAsStateWithLifecycle()
     val radioSearchResults by viewModel.radioSearchResults.collectAsStateWithLifecycle()
 
     var showAddStation by remember { mutableStateOf(false) }
     var showAddPodcast by remember { mutableStateOf(false) }
     var showAddMusic by remember { mutableStateOf(false) }
     var showRadioSearch by remember { mutableStateOf(false) }
-    var pendingMarkPlayed by remember { mutableStateOf(setOf<Int>()) }
+    val pendingMarkPlayed by viewModel.pendingMarkPlayed.collectAsStateWithLifecycle()
     
     var currentDestination by remember { 
         mutableStateOf(
@@ -91,8 +93,8 @@ fun PlayerScreen(
     }
 
     var podcastNav by remember { mutableStateOf(PodcastNavigation.DASHBOARD) }
+    var cameFromRecent by remember { mutableStateOf(false) }
     var selectedPodcastId by remember { mutableIntStateOf(-1) }
-    var selectedEpisode by remember { mutableStateOf<com.michael.simplemusic.data.PodcastEpisode?>(null) }
 
     var isPlayerVisible by remember { mutableStateOf(false) }
 
@@ -104,6 +106,18 @@ fun PlayerScreen(
             val docFile = DocumentFile.fromTreeUri(context, folderUri)
             viewModel.setFolder(folderUri, docFile?.name ?: "Unknown Folder")
             isPlayerVisible = true
+        }
+    }
+
+    BackHandler(enabled = isPlayerVisible || (currentDestination == NavigationDestination.PODCASTS && podcastNav != PodcastNavigation.DASHBOARD)) {
+        if (isPlayerVisible) {
+            isPlayerVisible = false
+        } else if (currentDestination == NavigationDestination.PODCASTS) {
+            podcastNav = when (podcastNav) {
+                PodcastNavigation.SHOW_DETAIL -> PodcastNavigation.DASHBOARD
+                PodcastNavigation.EPISODE_DETAIL -> if (cameFromRecent) PodcastNavigation.DASHBOARD else PodcastNavigation.SHOW_DETAIL
+                else -> PodcastNavigation.DASHBOARD
+            }
         }
     }
 
@@ -145,7 +159,7 @@ fun PlayerScreen(
                             } else {
                                 podcastNav = when(podcastNav) {
                                     PodcastNavigation.SHOW_DETAIL -> PodcastNavigation.DASHBOARD
-                                    PodcastNavigation.EPISODE_DETAIL -> PodcastNavigation.SHOW_DETAIL
+                                    PodcastNavigation.EPISODE_DETAIL -> if (cameFromRecent) PodcastNavigation.DASHBOARD else PodcastNavigation.SHOW_DETAIL
                                     else -> PodcastNavigation.DASHBOARD
                                 }
                             }
@@ -269,41 +283,44 @@ fun PlayerScreen(
                     } else {
                         when (podcastNav) {
                             PodcastNavigation.DASHBOARD -> {
-                            PodcastDashboard(
-                                channels = allChannels.filter { it.type == ChannelType.PODCAST },
-                                downloadedEpisodes = downloadedEpisodes,
-                                activeView = podcastView,
-                                onChannelClick = { id -> selectedPodcastId = id; viewModel.selectChannel(id); podcastNav = PodcastNavigation.SHOW_DETAIL },
-                                onEpisodeClick = { selectedEpisode = it; podcastNav = PodcastNavigation.EPISODE_DETAIL },
-                                onMarkPlayed = { viewModel.markEpisodeAsPlayed(it) },
-                                onSwitchView = { viewModel.setPodcastView(it) },
-                                onCreateChannel = { showAddPodcast = true },
-                                onDownloadAllNew = { viewModel.downloadAllNew() },
-                                onDeleteChannel = { viewModel.deleteChannel(it) },
-                                onRenameChannel = { id, name -> viewModel.renameChannel(id, name) },
-                                onUrlUpdate = { id, url -> viewModel.setRadioUrl(id, url) },
-                                pendingMarkPlayed = pendingMarkPlayed,
-                                setPendingMarkPlayed = { pendingMarkPlayed = it }
-                            )
-                        }
+                                PodcastDashboard(
+                                    channels = allChannels.filter { it.type == ChannelType.PODCAST },
+                                    recentEpisodes = recentEpisodes,
+                                    activeView = podcastView,
+                                    onChannelClick = { id -> selectedPodcastId = id; viewModel.selectChannel(id); podcastNav = PodcastNavigation.SHOW_DETAIL },
+                                    onEpisodeClick = { viewModel.setActiveEpisode(it); cameFromRecent = true; podcastNav = PodcastNavigation.EPISODE_DETAIL },
+                                    onMarkPlayed = { viewModel.markEpisodeAsPlayed(it) },
+                                    onSwitchView = { viewModel.setPodcastView(it) },
+                                    onCreateChannel = { showAddPodcast = true },
+                                    onDownloadAllNew = { viewModel.downloadAllNew() },
+                                    onDeleteChannel = { viewModel.deleteChannel(it) },
+                                    onUrlUpdate = { id, url -> viewModel.setRadioUrl(id, url) },
+                                    pendingMarkPlayed = pendingMarkPlayed,
+                                    onSwipeMarkPlayed = { viewModel.markAsPlayedWithUndo(it) },
+                                    onUndoMarkPlayed = { viewModel.undoMarkAsPlayed(it) }
+                                )
+                            }
                         PodcastNavigation.SHOW_DETAIL -> {
                             PodcastShowDetail(
                                 episodes = if (appConfig.hidePlayedEpisodes) podcastEpisodes.filter { !it.isFinished } else podcastEpisodes,
-                                onEpisodeClick = { selectedEpisode = it; podcastNav = PodcastNavigation.EPISODE_DETAIL },
+                                onEpisodeClick = { viewModel.setActiveEpisode(it); cameFromRecent = false; podcastNav = PodcastNavigation.EPISODE_DETAIL },
                                 onPlayEpisode = { viewModel.playPodcastEpisode(it) },
                                 onDownload = { viewModel.downloadEpisode(it) },
                                 onDelete = { viewModel.deleteEpisodeFile(it) },
-                                onMarkPlayed = { viewModel.markEpisodeAsPlayed(it) }
+                                onMarkPlayed = { viewModel.markAsPlayedWithUndo(it) },
+                                pendingMarkPlayed = pendingMarkPlayed,
+                                onUndoMarkPlayed = { viewModel.undoMarkAsPlayed(it) }
                             )
                         }
                         PodcastNavigation.EPISODE_DETAIL -> {
-                            selectedEpisode?.let { episode ->
+                            activePodcastEpisode?.let { episode ->
                                 EpisodeDetailScreen(
                                     episode = episode,
                                     onPlay = { viewModel.playPodcastEpisode(it) },
                                     onDownload = { viewModel.downloadEpisode(it) },
                                     onDelete = { viewModel.deleteEpisodeFile(it) },
-                                    onMarkPlayed = { viewModel.markEpisodeAsPlayed(it); podcastNav = PodcastNavigation.SHOW_DETAIL }
+                                    onMarkPlayed = { viewModel.markEpisodeAsPlayed(it) },
+                                    onMarkUnplayed = { viewModel.markEpisodeAsUnplayed(it) }
                                 )
                             }
                         }
@@ -314,7 +331,7 @@ fun PlayerScreen(
             
         // Overlays
         if (showAddStation) AddChannelScreen(title = "Add Radio Station", nameLabel = "Station Name", urlLabel = "Stream URL (http/https)", onSave = { name, url -> viewModel.createChannel(name, ChannelType.RADIO, url); showAddStation = false }, onDismiss = { showAddStation = false })
-        if (showAddPodcast) AddChannelScreen(title = "Subscribe to Podcast", nameLabel = "Podcast Name", urlLabel = "RSS Feed URL", onSave = { name, url -> viewModel.createChannel(name, ChannelType.PODCAST, url); showAddPodcast = false }, onDismiss = { showAddPodcast = false })
+        if (showAddPodcast) AddPodcastScreen(onSave = { url -> viewModel.createChannel("", ChannelType.PODCAST, url); showAddPodcast = false }, onDismiss = { showAddPodcast = false })
         if (showAddMusic) AddMusicDeckScreen(onSave = { name -> viewModel.createChannel(name, ChannelType.FOLDER); showAddMusic = false }, onDismiss = { showAddMusic = false })
         if (showRadioSearch) RadioSearchDialog(results = radioSearchResults, onSearch = { viewModel.searchRadioStations(it) }, onSelect = { result -> viewModel.createChannel(result.name, ChannelType.RADIO, result.url); showRadioSearch = false }, onDismiss = { showRadioSearch = false })
         }
@@ -429,11 +446,9 @@ fun RadioCard(channel: AudioChannel, isActive: Boolean, isPlaying: Boolean, stat
 }
 
 @Composable
-fun PodcastCard(channel: AudioChannel, onClick: () -> Unit, onDelete: () -> Unit, onRename: (String) -> Unit, onUrlUpdate: (String) -> Unit) {
+fun PodcastCard(channel: AudioChannel, onClick: () -> Unit, onDelete: () -> Unit, onUrlUpdate: (String) -> Unit) {
     var showMenu by remember { mutableStateOf(false) }
-    var showRenameDialog by remember { mutableStateOf(false) }
     var showUrlDialog by remember { mutableStateOf(false) }
-    var renameInput by remember { mutableStateOf(channel.name) }
     var urlInput by remember { mutableStateOf(channel.streamUrl ?: "") }
 
     Card(modifier = Modifier.fillMaxWidth().pointerInput(Unit) { detectTapGestures(onTap = { onClick() }, onLongPress = { showMenu = true }) }) {
@@ -443,16 +458,29 @@ fun PodcastCard(channel: AudioChannel, onClick: () -> Unit, onDelete: () -> Unit
             Text(channel.name, style = MaterialTheme.typography.titleLarge)
         }
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-            DropdownMenuItem(text = { Text("Rename") }, onClick = { showRenameDialog = true; showMenu = false })
             DropdownMenuItem(text = { Text("Edit RSS URL") }, onClick = { showUrlDialog = true; showMenu = false })
             DropdownMenuItem(text = { Text("Delete", color = MaterialTheme.colorScheme.error) }, onClick = { onDelete(); showMenu = false })
         }
     }
-    if (showRenameDialog) {
-        AlertDialog(onDismissRequest = { showRenameDialog = false }, title = { Text("Rename Podcast") }, text = { OutlinedTextField(value = renameInput, onValueChange = { renameInput = it }, label = { Text("Name") }) }, confirmButton = { Button(onClick = { onRename(renameInput); showRenameDialog = false }) { Text("Save") } })
-    }
     if (showUrlDialog) {
         AlertDialog(onDismissRequest = { showUrlDialog = false }, title = { Text("Edit RSS URL") }, text = { OutlinedTextField(value = urlInput, onValueChange = { urlInput = it }, label = { Text("URL") }, modifier = Modifier.fillMaxWidth()) }, confirmButton = { Button(onClick = { onUrlUpdate(urlInput); showUrlDialog = false }) { Text("Save") } })
+    }
+}
+
+@Composable
+fun AddPodcastScreen(onSave: (String) -> Unit, onDismiss: () -> Unit) {
+    var url by remember { mutableStateOf("") }
+    Surface(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) }
+                Text("Subscribe to Podcast", style = MaterialTheme.typography.headlineMedium)
+            }
+            Spacer(Modifier.height(32.dp))
+            OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("RSS Feed URL") }, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(32.dp))
+            Button(onClick = { onSave(url) }, modifier = Modifier.fillMaxWidth().height(56.dp), enabled = url.isNotBlank()) { Text("Subscribe") }
+        }
     }
 }
 
@@ -562,7 +590,7 @@ fun AddButton(text: String, onClick: () -> Unit) {
 }
 
 @Composable
-fun PodcastDashboard(channels: List<AudioChannel>, downloadedEpisodes: List<com.michael.simplemusic.data.PodcastEpisode>, activeView: String, onChannelClick: (Int) -> Unit, onEpisodeClick: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onSwitchView: (String) -> Unit, onCreateChannel: () -> Unit, onDownloadAllNew: () -> Unit, onDeleteChannel: (Int) -> Unit, onRenameChannel: (Int, String) -> Unit, onUrlUpdate: (Int, String) -> Unit, pendingMarkPlayed: Set<Int>, setPendingMarkPlayed: (Set<Int>) -> Unit) {
+fun PodcastDashboard(channels: List<AudioChannel>, recentEpisodes: List<com.michael.simplemusic.data.PodcastEpisode>, activeView: String, onChannelClick: (Int) -> Unit, onEpisodeClick: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onSwitchView: (String) -> Unit, onCreateChannel: () -> Unit, onDownloadAllNew: () -> Unit, onDeleteChannel: (Int) -> Unit, onUrlUpdate: (Int, String) -> Unit, pendingMarkPlayed: Set<Int>, onSwipeMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onUndoMarkPlayed: (Int) -> Unit) {
     Column(modifier = Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = if (activeView == "SHOWS") 0 else 1) {
             Tab(selected = activeView == "SHOWS", onClick = { onSwitchView("SHOWS") }, text = { Text("Shows") })
@@ -577,16 +605,15 @@ fun PodcastDashboard(channels: List<AudioChannel>, downloadedEpisodes: List<com.
                         channel = channel,
                         onClick = { onChannelClick(channel.id) },
                         onDelete = { onDeleteChannel(channel.id) },
-                        onRename = { newName -> onRenameChannel(channel.id, newName) },
                         onUrlUpdate = { newUrl -> onUrlUpdate(channel.id, newUrl) }
                     )
                 }
                 item { AddButton("Subscribe to RSS", onCreateChannel) }
             }
         } else {
-            if (downloadedEpisodes.isEmpty()) Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { 
+            if (recentEpisodes.isEmpty()) Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { 
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("No downloaded episodes", color = MaterialTheme.colorScheme.outline)
+                    Text("No recent episodes", color = MaterialTheme.colorScheme.outline)
                     Spacer(Modifier.height(16.dp))
                     Button(onClick = onDownloadAllNew) { Text("Download All New") }
                 }
@@ -597,26 +624,20 @@ fun PodcastDashboard(channels: List<AudioChannel>, downloadedEpisodes: List<com.
                         Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text("Download New (Last 2 Weeks)")
                     }
                 }
-                items(downloadedEpisodes.filter { it.id !in pendingMarkPlayed }) { episode ->
-                    EpisodeListItem(
-                        episode = episode,
-                        onClick = { onEpisodeClick(episode) },
-                        onPlay = { onEpisodeClick(episode) },
-                        onDownload = {},
-                        onDelete = {},
-                        onSwipe = { setPendingMarkPlayed(pendingMarkPlayed + episode.id) },
-                        isPending = false,
-                        onUndo = {}
-                    )
-                }
-                items(downloadedEpisodes.filter { it.id in pendingMarkPlayed }) { episode ->
-                    UndoItem(episode.title, onUndo = { setPendingMarkPlayed(pendingMarkPlayed - episode.id) })
-                    LaunchedEffect(episode.id) {
-                        delay(5000)
-                        if (episode.id in pendingMarkPlayed) {
-                            onMarkPlayed(episode)
-                            setPendingMarkPlayed(pendingMarkPlayed - episode.id)
-                        }
+                items(recentEpisodes, key = { it.id }) { episode ->
+                    if (episode.id in pendingMarkPlayed) {
+                        UndoItem(episode.title, onUndo = { onUndoMarkPlayed(episode.id) })
+                    } else {
+                        EpisodeListItem(
+                            episode = episode,
+                            onClick = { onEpisodeClick(episode) },
+                            onPlay = { onEpisodeClick(episode) },
+                            onDownload = {},
+                            onDelete = {},
+                            onSwipe = { onSwipeMarkPlayed(episode) },
+                            isPending = false,
+                            onUndo = {}
+                        )
                     }
                 }
             }
@@ -625,30 +646,22 @@ fun PodcastDashboard(channels: List<AudioChannel>, downloadedEpisodes: List<com.
 }
 
 @Composable
-fun PodcastShowDetail(episodes: List<com.michael.simplemusic.data.PodcastEpisode>, onEpisodeClick: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onPlayEpisode: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onDownload: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onDelete: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit) {
-    var pendingMarkPlayed by remember { mutableStateOf(setOf<Int>()) }
-
+fun PodcastShowDetail(episodes: List<com.michael.simplemusic.data.PodcastEpisode>, onEpisodeClick: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onPlayEpisode: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onDownload: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onDelete: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, pendingMarkPlayed: Set<Int>, onUndoMarkPlayed: (Int) -> Unit) {
     LazyColumn(modifier = Modifier.fillMaxSize()) {
-        items(episodes.filter { it.id !in pendingMarkPlayed }) { episode ->
-            EpisodeListItem(
-                episode = episode,
-                onClick = { onEpisodeClick(episode) },
-                onPlay = { onPlayEpisode(episode) },
-                onDownload = { onDownload(episode) },
-                onDelete = { onDelete(episode) },
-                onSwipe = { pendingMarkPlayed = pendingMarkPlayed + episode.id },
-                isPending = false,
-                onUndo = {}
-            )
-        }
-        items(episodes.filter { it.id in pendingMarkPlayed }) { episode ->
-            UndoItem(episode.title, onUndo = { pendingMarkPlayed = pendingMarkPlayed - episode.id })
-            LaunchedEffect(episode.id) {
-                delay(5000)
-                if (episode.id in pendingMarkPlayed) {
-                    onMarkPlayed(episode)
-                    pendingMarkPlayed = pendingMarkPlayed - episode.id
-                }
+        items(episodes, key = { it.id }) { episode ->
+            if (episode.id in pendingMarkPlayed) {
+                UndoItem(episode.title, onUndo = { onUndoMarkPlayed(episode.id) })
+            } else {
+                EpisodeListItem(
+                    episode = episode,
+                    onClick = { onEpisodeClick(episode) },
+                    onPlay = { onPlayEpisode(episode) },
+                    onDownload = { onDownload(episode) },
+                    onDelete = { onDelete(episode) },
+                    onSwipe = { onMarkPlayed(episode) },
+                    isPending = false,
+                    onUndo = {}
+                )
             }
         }
     }
@@ -656,10 +669,20 @@ fun PodcastShowDetail(episodes: List<com.michael.simplemusic.data.PodcastEpisode
 
 @Composable
 fun UndoItem(title: String, onUndo: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Marking as played...", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            TextButton(onClick = onUndo) { Text("UNDO") }
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+    ) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.onTertiaryContainer)
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Marked played", style = MaterialTheme.typography.labelLarge)
+                Text(title, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Button(onClick = onUndo, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)) {
+                Text("UNDO")
+            }
         }
     }
 }
@@ -678,8 +701,8 @@ fun EpisodeListItem(episode: com.michael.simplemusic.data.PodcastEpisode, onClic
     SwipeToDismissBox(
         state = dismissState,
         backgroundContent = {
-            Box(Modifier.fillMaxSize().background(Color.Green.copy(alpha = 0.5f)).padding(horizontal = 20.dp), contentAlignment = Alignment.CenterEnd) {
-                Icon(Icons.Default.Check, null, tint = Color.White)
+            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 20.dp), contentAlignment = Alignment.CenterEnd) {
+                Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary)
             }
         }
     ) {
@@ -688,14 +711,17 @@ fun EpisodeListItem(episode: com.michael.simplemusic.data.PodcastEpisode, onClic
             Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 // Play button with circular progress
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.size(48.dp).clickable { onPlay() }) {
-                    val progress = if (episode.durationMs > 0) episode.playbackPositionMs.toFloat() / episode.durationMs.toFloat() else 0f
-                    CircularProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxSize(), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surfaceVariant)
+                    val progress = if (episode.durationMs > 0) (1f - (episode.playbackPositionMs.toFloat() / episode.durationMs.toFloat())).coerceIn(0f, 1f) else 1f
+                    CircularProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxSize().rotate(-90f), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surfaceVariant)
                     Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(24.dp))
                 }
 
                 Spacer(Modifier.width(12.dp))
 
                 Column(modifier = Modifier.weight(1f).alpha(alpha)) {
+                    episode.podcastTitle?.let { title ->
+                        Text(title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+                    }
                     Text(episode.title, style = MaterialTheme.typography.titleSmall, maxLines = 2)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (episode.isDownloaded) {
@@ -731,7 +757,7 @@ fun EpisodeListItem(episode: com.michael.simplemusic.data.PodcastEpisode, onClic
 }
 
 @Composable
-fun EpisodeDetailScreen(episode: com.michael.simplemusic.data.PodcastEpisode, onPlay: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onDownload: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onDelete: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit) {
+fun EpisodeDetailScreen(episode: com.michael.simplemusic.data.PodcastEpisode, onPlay: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onDownload: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onDelete: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkUnplayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit) {
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text(episode.title, style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(8.dp))
@@ -740,8 +766,7 @@ fun EpisodeDetailScreen(episode: com.michael.simplemusic.data.PodcastEpisode, on
         
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (episode.isDownloaded) {
-                Button(onClick = { onPlay(episode) }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Play") }
-                OutlinedButton(onClick = { onDelete(episode) }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Delete, null); Spacer(Modifier.width(8.dp)); Text("Delete") }
+                Button(onClick = { onPlay(episode) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Play") }
             } else if (episode.isDownloading || episode.isQueued) {
                 Button(onClick = {}, enabled = false, modifier = Modifier.weight(1f)) { 
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
@@ -755,10 +780,13 @@ fun EpisodeDetailScreen(episode: com.michael.simplemusic.data.PodcastEpisode, on
         }
         
         Spacer(Modifier.height(8.dp))
-        OutlinedButton(onClick = { onMarkPlayed(episode) }, modifier = Modifier.fillMaxWidth()) { 
-            Icon(Icons.Default.Check, null)
+        OutlinedButton(
+            onClick = { if (episode.isFinished) onMarkUnplayed(episode) else onMarkPlayed(episode) },
+            modifier = Modifier.fillMaxWidth()
+        ) { 
+            Icon(if (episode.isFinished) Icons.Default.Replay else Icons.Default.Check, null)
             Spacer(Modifier.width(8.dp))
-            Text("Mark Played") 
+            Text(if (episode.isFinished) "Mark Unplayed" else "Mark Played") 
         }
 
         Spacer(Modifier.height(24.dp))

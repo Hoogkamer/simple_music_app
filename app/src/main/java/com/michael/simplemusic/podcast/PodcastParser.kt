@@ -10,7 +10,7 @@ import java.util.*
 class PodcastParser {
     private val dateFormat = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss Z", Locale.US)
 
-    fun parse(inputStream: InputStream, channelId: Int): List<PodcastEpisode> {
+    fun parse(inputStream: InputStream, channelId: Int): Pair<String, List<PodcastEpisode>> {
         inputStream.use {
             val parser = Xml.newPullParser()
             parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
@@ -20,35 +20,41 @@ class PodcastParser {
         }
     }
 
-    private fun readFeed(parser: XmlPullParser, channelId: Int): List<PodcastEpisode> {
-        val episodes = mutableListOf<PodcastEpisode>()
+    private fun readFeed(parser: XmlPullParser, channelId: Int): Pair<String, List<PodcastEpisode>> {
+        var title = ""
+        var episodes = listOf<PodcastEpisode>()
 
         parser.require(XmlPullParser.START_TAG, null, "rss")
         while (parser.next() != XmlPullParser.END_TAG) {
             if (parser.eventType != XmlPullParser.START_TAG) continue
             if (parser.name == "channel") {
-                episodes.addAll(readChannel(parser, channelId))
+                val result = readChannel(parser, channelId)
+                title = result.first
+                episodes = result.second
             } else {
                 skip(parser)
             }
         }
-        return episodes
+        return Pair(title, episodes)
     }
 
-    private fun readChannel(parser: XmlPullParser, channelId: Int): List<PodcastEpisode> {
+    private fun readChannel(parser: XmlPullParser, channelId: Int): Pair<String, List<PodcastEpisode>> {
         val episodes = mutableListOf<PodcastEpisode>()
+        var podcastTitle = ""
         while (parser.next() != XmlPullParser.END_TAG) {
             if (parser.eventType != XmlPullParser.START_TAG) continue
-            if (parser.name == "item") {
-                readEpisode(parser, channelId)?.let { episodes.add(it) }
-            } else {
-                skip(parser)
+            when (parser.name) {
+                "title" -> podcastTitle = readText(parser)
+                "item" -> {
+                    readEpisode(parser, channelId, podcastTitle)?.let { episodes.add(it) }
+                }
+                else -> skip(parser)
             }
         }
-        return episodes
+        return Pair(podcastTitle, episodes)
     }
 
-    private fun readEpisode(parser: XmlPullParser, channelId: Int): PodcastEpisode? {
+    private fun readEpisode(parser: XmlPullParser, channelId: Int, podcastTitle: String): PodcastEpisode? {
         var title = ""
         var description = ""
         var streamUrl = ""
@@ -60,7 +66,7 @@ class PodcastParser {
             when (parser.name) {
                 "title" -> title = readText(parser)
                 "description" -> description = readText(parser)
-                "link" -> { /* skip */ skip(parser) }
+                "link" -> { skip(parser) }
                 "enclosure" -> {
                     streamUrl = parser.getAttributeValue(null, "url") ?: ""
                     skip(parser)
@@ -83,7 +89,8 @@ class PodcastParser {
             description = description,
             streamUrl = streamUrl,
             pubDate = pubDate,
-            guid = guid
+            guid = guid,
+            podcastTitle = podcastTitle
         )
     }
 

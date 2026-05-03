@@ -34,7 +34,8 @@ data class PodcastEpisode(
     val durationMs: Long = 0L,
     val playbackPositionMs: Long = 0L,
     val isFinished: Boolean = false,
-    val guid: String // Unique ID from RSS to prevent duplicates
+    val guid: String, // Unique ID from RSS to prevent duplicates
+    val podcastTitle: String? = null // Title of the podcast show
 ) {
     companion object {
         const val STATUS_IDLE = 0

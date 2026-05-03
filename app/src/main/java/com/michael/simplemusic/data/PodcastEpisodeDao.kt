@@ -9,6 +9,9 @@ interface PodcastEpisodeDao {
     fun getEpisodesForChannel(channelId: Int): Flow<List<PodcastEpisode>>
 
     @Query("SELECT * FROM podcast_episodes WHERE id = :id")
+    fun getEpisodeFlowById(id: Int): Flow<PodcastEpisode?>
+
+    @Query("SELECT * FROM podcast_episodes WHERE id = :id")
     suspend fun getEpisodeById(id: Int): PodcastEpisode?
 
     @Query("SELECT * FROM podcast_episodes WHERE channelId = :channelId AND guid = :guid")
@@ -26,8 +29,8 @@ interface PodcastEpisodeDao {
     @Query("DELETE FROM podcast_episodes WHERE channelId = :channelId AND downloadStatus != 3")
     suspend fun deleteNonDownloadedEpisodes(channelId: Int)
 
-    @Query("SELECT * FROM podcast_episodes WHERE (downloadStatus IN (1, 2, 3)) AND isFinished = 0 ORDER BY pubDate DESC")
-    fun getDownloadedEpisodes(): Flow<List<PodcastEpisode>>
+    @Query("SELECT * FROM podcast_episodes WHERE (downloadStatus IN (1, 2, 3) OR (pubDate >= :recentThreshold AND isFinished = 0)) AND isFinished = 0 ORDER BY pubDate DESC")
+    fun getRecentEpisodes(recentThreshold: Long): Flow<List<PodcastEpisode>>
 
     @Query("UPDATE podcast_episodes SET downloadStatus = 0 WHERE downloadStatus = 2")
     suspend fun clearDownloadingState()
