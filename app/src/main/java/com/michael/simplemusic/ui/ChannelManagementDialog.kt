@@ -10,50 +10,71 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.michael.simplemusic.data.ListeningState
+import com.michael.simplemusic.data.AudioChannel
+import com.michael.simplemusic.data.ChannelType
 
 @Composable
-fun StateManagementDialog(
-    states: List<ListeningState>,
-    activeStateId: Int?,
-    onCreateState: (String) -> Unit,
-    onRenameState: (Int, String) -> Unit,
-    onDeleteState: (Int) -> Unit,
+fun ChannelManagementDialog(
+    channels: List<AudioChannel>,
+    activeChannelId: Int?,
+    onCreateChannel: (String, ChannelType) -> Unit,
+    onRenameChannel: (Int, String) -> Unit,
+    onDeleteChannel: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var newStateName by remember { mutableStateOf("") }
-    var editingStateId by remember { mutableStateOf<Int?>(null) }
+    var newChannelName by remember { mutableStateOf("") }
+    var selectedType by remember { mutableStateOf(ChannelType.FOLDER) }
+    var editingChannelId by remember { mutableStateOf<Int?>(null) }
     var editingName by remember { mutableStateOf("") }
     var showDeleteConfirm by remember { mutableStateOf<Int?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Manage Listening States") },
+        title = { Text("Manage Channels") },
         text = {
             Column(modifier = Modifier.widthIn(min = 280.dp)) {
-                // Create new state
-                if (states.size < 5) {
+                // Create new channel
+                if (channels.size < 20) {
                     OutlinedTextField(
-                        value = newStateName,
-                        onValueChange = { newStateName = it },
-                        label = { Text("New state name") },
+                        value = newChannelName,
+                        onValueChange = { newChannelName = it },
+                        label = { Text("New channel name") },
                         singleLine = true,
-                        trailingIcon = {
-                            if (newStateName.isNotBlank()) {
-                                IconButton(onClick = {
-                                    onCreateState(newStateName.trim())
-                                    newStateName = ""
-                                }) {
-                                    Icon(Icons.Default.Add, contentDescription = "Add")
-                                }
-                            }
-                        },
                         modifier = Modifier.fillMaxWidth()
                     )
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        ChannelType.values().forEach { type ->
+                            FilterChip(
+                                selected = selectedType == type,
+                                onClick = { selectedType = type },
+                                label = { Text(type.name.lowercase().capitalize()) }
+                            )
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            if (newChannelName.isNotBlank()) {
+                                onCreateChannel(newChannelName.trim(), selectedType)
+                                newChannelName = ""
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        enabled = newChannelName.isNotBlank()
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Add Channel")
+                    }
+                    
                     Spacer(modifier = Modifier.height(16.dp))
                 } else {
                     Text(
-                        "Maximum of 5 states reached",
+                        "Maximum of 20 channels reached",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -63,10 +84,10 @@ fun StateManagementDialog(
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Existing states list
+                // Existing channels list
                 LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
-                    items(states) { state ->
-                        if (editingStateId == state.id) {
+                    items(channels) { channel ->
+                        if (editingChannelId == channel.id) {
                             // Inline rename mode
                             OutlinedTextField(
                                 value = editingName,
@@ -76,13 +97,13 @@ fun StateManagementDialog(
                                     Row {
                                         IconButton(onClick = {
                                             if (editingName.isNotBlank()) {
-                                                onRenameState(state.id, editingName.trim())
+                                                onRenameChannel(channel.id, editingName.trim())
                                             }
-                                            editingStateId = null
+                                            editingChannelId = null
                                         }) {
                                             Icon(Icons.Default.Check, contentDescription = "Save")
                                         }
-                                        IconButton(onClick = { editingStateId = null }) {
+                                        IconButton(onClick = { editingChannelId = null }) {
                                             Icon(Icons.Default.Close, contentDescription = "Cancel")
                                         }
                                     }
@@ -97,7 +118,7 @@ fun StateManagementDialog(
                                     .padding(vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                if (state.id == activeStateId) {
+                                if (channel.id == activeChannelId) {
                                     Icon(
                                         Icons.Default.PlayArrow,
                                         contentDescription = "Active",
@@ -106,14 +127,23 @@ fun StateManagementDialog(
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                 }
+                                
+                                val typeIcon = when(channel.type) {
+                                    ChannelType.FOLDER -> Icons.Default.Folder
+                                    ChannelType.RADIO -> Icons.Default.Radio
+                                    ChannelType.PODCAST -> Icons.Default.Podcasts
+                                }
+                                Icon(typeIcon, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.secondary)
+                                Spacer(modifier = Modifier.width(8.dp))
+
                                 Text(
-                                    state.name,
+                                    channel.name,
                                     style = MaterialTheme.typography.bodyLarge,
                                     modifier = Modifier.weight(1f)
                                 )
                                 IconButton(onClick = {
-                                    editingStateId = state.id
-                                    editingName = state.name
+                                    editingChannelId = channel.id
+                                    editingName = channel.name
                                 }) {
                                     Icon(
                                         Icons.Default.Edit,
@@ -122,7 +152,7 @@ fun StateManagementDialog(
                                     )
                                 }
                                 IconButton(onClick = {
-                                    showDeleteConfirm = state.id
+                                    showDeleteConfirm = channel.id
                                 }) {
                                     Icon(
                                         Icons.Default.Delete,
@@ -145,18 +175,18 @@ fun StateManagementDialog(
     )
 
     // Delete confirmation dialog
-    showDeleteConfirm?.let { stateId ->
-        val stateName = states.find { it.id == stateId }?.name ?: ""
+    showDeleteConfirm?.let { channelId ->
+        val channelName = channels.find { it.id == channelId }?.name ?: ""
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = null },
-            title = { Text("Delete State") },
+            title = { Text("Delete Channel") },
             text = {
-                Text("Delete \"$stateName\"? This will remove the saved folder and playback position.")
+                Text("Delete \"$channelName\"? This will remove all saved settings for this channel.")
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        onDeleteState(stateId)
+                        onDeleteChannel(channelId)
                         showDeleteConfirm = null
                     },
                     colors = ButtonDefaults.textButtonColors(
@@ -174,3 +204,5 @@ fun StateManagementDialog(
         )
     }
 }
+
+private fun String.capitalize() = this.lowercase().replaceFirstChar { it.uppercase() }

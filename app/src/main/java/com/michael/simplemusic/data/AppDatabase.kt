@@ -4,10 +4,14 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
 
-@Database(entities = [ListeningState::class], version = 1, exportSchema = false)
+@Database(entities = [AudioChannel::class, PodcastEpisode::class, AppConfig::class], version = 11, exportSchema = false)
+@TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
-    abstract fun listeningStateDao(): ListeningStateDao
+    abstract fun audioChannelDao(): AudioChannelDao
+    abstract fun podcastEpisodeDao(): PodcastEpisodeDao
+    abstract fun appConfigDao(): AppConfigDao
 
     companion object {
         @Volatile
@@ -19,7 +23,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "simple_music_db"
-                ).build()
+                )
+                .fallbackToDestructiveMigration()
+                .build()
                 INSTANCE = instance
                 instance
             }

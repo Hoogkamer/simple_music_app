@@ -24,13 +24,14 @@ class FolderScanner(private val context: Context) {
         currentPath: String,
         results: MutableList<AudioFile>
     ) {
-        directory.listFiles().forEach { file ->
+        val list = directory.listFiles()
+        list.forEach { file ->
             val name = file.name ?: return@forEach
 
             if (file.isDirectory) {
                 val subPath = if (currentPath.isEmpty()) name else "$currentPath/$name"
                 scanRecursive(file, subPath, results)
-            } else if (file.isFile && name.lowercase().endsWith(".mp3")) {
+            } else if (file.isFile && name.endsWith(".mp3", ignoreCase = true)) {
                 val relativePath = if (currentPath.isEmpty()) name else "$currentPath/$name"
                 results.add(
                     AudioFile(
