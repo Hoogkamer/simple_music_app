@@ -25,6 +25,8 @@ data class AudioChannel(
     val currentTrackUri: String? = null,
     val currentTrackIndex: Int = 0,
     val currentTrackTitle: String? = null,
+    val currentTrackArtist: String? = null,
+    val currentTrackAlbum: String? = null,
     val currentPositionMs: Long = 0L,
     val currentTrackDurationMs: Long = 0L,
     val shuffleEnabled: Boolean = false,

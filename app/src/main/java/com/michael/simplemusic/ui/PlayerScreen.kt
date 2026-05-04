@@ -68,6 +68,9 @@ fun PlayerScreen(
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
     val playbackSpeed by viewModel.playbackSpeed.collectAsStateWithLifecycle()
     val currentTrackName by viewModel.currentTrackName.collectAsStateWithLifecycle()
+    val currentTrackArtist by viewModel.currentTrackArtist.collectAsStateWithLifecycle()
+    val currentTrackAlbum by viewModel.currentTrackAlbum.collectAsStateWithLifecycle()
+    val currentTrackIndex by viewModel.currentTrackIndex.collectAsStateWithLifecycle()
     val streamMetadata by viewModel.streamMetadata.collectAsStateWithLifecycle()
     val currentPositionMs by viewModel.currentPositionMs.collectAsStateWithLifecycle()
     val durationMs by viewModel.durationMs.collectAsStateWithLifecycle()
@@ -81,6 +84,7 @@ fun PlayerScreen(
 
     var showAddStation by remember { mutableStateOf(false) }
     var showBulkImport by remember { mutableStateOf(false) }
+    var showBulkImportPodcasts by remember { mutableStateOf(false) }
     var showAddPodcast by remember { mutableStateOf(false) }
     var showAddMusic by remember { mutableStateOf(false) }
     var showRadioSearch by remember { mutableStateOf(false) }
@@ -136,6 +140,20 @@ fun PlayerScreen(
             try {
                 val content = context.contentResolver.openInputStream(fileUri)?.bufferedReader()?.use { it.readText() }
                 content?.let { viewModel.bulkAddRadioStations(it) }
+            } catch (e: Exception) {
+                // Handle error if needed
+            }
+        }
+    }
+
+    val importPodcastLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { fileUri ->
+            val context = viewModel.getApplication<android.app.Application>()
+            try {
+                val content = context.contentResolver.openInputStream(fileUri)?.bufferedReader()?.use { it.readText() }
+                content?.let { viewModel.bulkAddPodcasts(it) }
             } catch (e: Exception) {
                 // Handle error if needed
             }
@@ -251,6 +269,7 @@ fun PlayerScreen(
                                 Icon(Icons.Default.MusicNote, null, tint = MaterialTheme.colorScheme.primary)
                                 Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                                     Text(currentTrackName.ifEmpty { streamMetadata ?: "Total Audio Hub" }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    if (!currentTrackArtist.isNullOrBlank()) Text(currentTrackArtist!!, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     if (durationMs > 0) LinearProgressIndicator(progress = { (currentPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp).height(2.dp))
                                 }
                                 IconButton(onClick = { 
@@ -284,11 +303,18 @@ fun PlayerScreen(
                         isPlayerVisible = isPlayerVisible,
                         activeChannel = activeMusicChannel,
                         audioFiles = audioFiles,
+                        currentTrackName = currentTrackName,
+                        currentTrackArtist = currentTrackArtist,
+                        currentTrackAlbum = currentTrackAlbum,
+                        currentTrackIndex = currentTrackIndex,
                         onChannelClick = { viewModel.selectChannel(it); isPlayerVisible = true },
                         onDeleteChannel = { viewModel.deleteChannel(it) },
                         onRenameChannel = { id, name -> viewModel.renameChannel(id, name) },
                         onCreateChannel = { showAddMusic = true },
-                        onFolderPick = { folderPickerLauncher.launch(null) },
+                        onFolderPick = { 
+                            val initialUri = activeMusicChannel?.folderUri?.let { Uri.parse(it) }
+                            folderPickerLauncher.launch(initialUri)
+                        },
                         onPlayPause = { 
                             val channel = activeMusicChannel
                             if (channel != null && activeChannelId != channel.id) {
@@ -356,7 +382,8 @@ fun PlayerScreen(
                                     onUrlUpdate = { id, url -> viewModel.setRadioUrl(id, url) },
                                     pendingMarkPlayed = pendingMarkPlayed,
                                     onSwipeMarkPlayed = { viewModel.markAsPlayedWithUndo(it) },
-                                    onUndoMarkPlayed = { viewModel.undoMarkAsPlayed(it) }
+                                    onUndoMarkPlayed = { viewModel.undoMarkAsPlayed(it) },
+                                    onBulkImport = { showBulkImportPodcasts = true }
                                 )
                             }
                         PodcastNavigation.SHOW_DETAIL -> {
@@ -405,19 +432,27 @@ fun PlayerScreen(
         if (showRadioSearch) RadioSearchDialog(results = radioSearchResults, onSearch = { viewModel.searchRadioStations(it) }, onSelect = { result -> viewModel.createChannel(result.name, ChannelType.RADIO, result.url); showRadioSearch = false }, onDismiss = { showRadioSearch = false })
         
         if (showBulkImport) BulkImportDialog(
+            title = "Bulk Import Radio Stations",
             onSave = { viewModel.bulkAddRadioStations(it); showBulkImport = false },
             onFilePick = { importRadioLauncher.launch(arrayOf("text/*", "application/*")); showBulkImport = false },
             onDismiss = { showBulkImport = false }
+        )
+
+        if (showBulkImportPodcasts) BulkImportDialog(
+            title = "Bulk Import Podcasts",
+            onSave = { viewModel.bulkAddPodcasts(it); showBulkImportPodcasts = false },
+            onFilePick = { importPodcastLauncher.launch(arrayOf("text/*", "application/*")); showBulkImportPodcasts = false },
+            onDismiss = { showBulkImportPodcasts = false }
         )
         }
     }
 }
 
 @Composable
-fun MusicDashboard(channels: List<AudioChannel>, activeChannelId: Int?, isPlaying: Boolean, currentPositionMs: Long, currentDurationMs: Long, isPlayerVisible: Boolean, activeChannel: AudioChannel?, audioFiles: List<com.michael.simplemusic.scanner.AudioFile>, onChannelClick: (Int) -> Unit, onDeleteChannel: (Int) -> Unit, onRenameChannel: (Int, String) -> Unit, onCreateChannel: () -> Unit, onFolderPick: () -> Unit, onPlayPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit, onToggleShuffle: () -> Unit, onToggleRepeat: () -> Unit) {
+fun MusicDashboard(channels: List<AudioChannel>, activeChannelId: Int?, isPlaying: Boolean, currentPositionMs: Long, currentDurationMs: Long, isPlayerVisible: Boolean, activeChannel: AudioChannel?, audioFiles: List<com.michael.simplemusic.scanner.AudioFile>, currentTrackName: String, currentTrackArtist: String?, currentTrackAlbum: String?, currentTrackIndex: Int, onChannelClick: (Int) -> Unit, onDeleteChannel: (Int) -> Unit, onRenameChannel: (Int, String) -> Unit, onCreateChannel: () -> Unit, onFolderPick: () -> Unit, onPlayPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit, onToggleShuffle: () -> Unit, onToggleRepeat: () -> Unit) {
     if (isPlayerVisible && activeChannel != null) {
         Box(modifier = Modifier.padding(16.dp)) {
-            FolderPlayer(activeChannel, audioFiles, isPlaying && activeChannelId == activeChannel.id, if (activeChannelId == activeChannel.id) "" else activeChannel.currentTrackTitle ?: "", 0, if (activeChannelId == activeChannel.id) currentPositionMs else activeChannel.currentPositionMs, if (activeChannelId == activeChannel.id) currentDurationMs else activeChannel.currentTrackDurationMs, false, true, onFolderPick, onPlayPause, onNext, onPrevious, onSeek, onToggleShuffle, onToggleRepeat)
+            FolderPlayer(activeChannel, audioFiles, isPlaying && activeChannelId == activeChannel.id, if (activeChannelId == activeChannel.id) currentTrackName else activeChannel.currentTrackTitle ?: "", if (activeChannelId == activeChannel.id) currentTrackArtist else activeChannel.currentTrackArtist, if (activeChannelId == activeChannel.id) currentTrackAlbum else activeChannel.currentTrackAlbum, currentTrackIndex, if (activeChannelId == activeChannel.id) currentPositionMs else activeChannel.currentPositionMs, if (activeChannelId == activeChannel.id) currentDurationMs else activeChannel.currentTrackDurationMs, false, true, onFolderPick, onPlayPause, onNext, onPrevious, onSeek, onToggleShuffle, onToggleRepeat)
         }
     } else if (channels.isEmpty()) {
         EmptyState("No music decks yet", Icons.Default.LibraryMusic, onCreateChannel)
@@ -490,6 +525,7 @@ fun DeckCard(channel: AudioChannel, isActive: Boolean, isPlaying: Boolean, pos: 
             }
             Spacer(Modifier.height(12.dp))
             Text(channel.currentTrackTitle ?: "No track playing", style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (!channel.currentTrackArtist.isNullOrBlank()) Text(channel.currentTrackArtist, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             LinearProgressIndicator(progress = { if (dur > 0) (pos.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(8.dp))
             Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(formatDuration(pos), style = MaterialTheme.typography.bodySmall); Text(formatDuration(dur), style = MaterialTheme.typography.bodySmall)
@@ -634,7 +670,7 @@ fun RadioSearchDialog(results: List<com.michael.simplemusic.ui.RadioStationResul
 }
 
 @Composable
-fun FolderPlayer(activeChannel: AudioChannel, audioFiles: List<com.michael.simplemusic.scanner.AudioFile>, isPlaying: Boolean, currentTrackName: String, currentTrackIndex: Int, currentPositionMs: Long, durationMs: Long, shuffleEnabled: Boolean, repeatEnabled: Boolean, onFolderPick: () -> Unit, onPlayPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit, onToggleShuffle: () -> Unit, onToggleRepeat: () -> Unit) {
+fun FolderPlayer(activeChannel: AudioChannel, audioFiles: List<com.michael.simplemusic.scanner.AudioFile>, isPlaying: Boolean, currentTrackName: String, currentTrackArtist: String?, currentTrackAlbum: String?, currentTrackIndex: Int, currentPositionMs: Long, durationMs: Long, shuffleEnabled: Boolean, repeatEnabled: Boolean, onFolderPick: () -> Unit, onPlayPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit, onToggleShuffle: () -> Unit, onToggleRepeat: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxSize()) {
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surfaceVariant)) {
             Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -647,7 +683,13 @@ fun FolderPlayer(activeChannel: AudioChannel, audioFiles: List<com.michael.simpl
             }
         }
         Spacer(Modifier.weight(1f))
-        Text(currentTrackName.ifEmpty { activeChannel.currentTrackTitle ?: "Ready" }, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center, maxLines = 3, modifier = Modifier.fillMaxWidth())
+        Text(currentTrackName.ifEmpty { activeChannel.currentTrackTitle ?: "Ready" }, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center, maxLines = 2, modifier = Modifier.fillMaxWidth())
+        if (!currentTrackArtist.isNullOrBlank()) {
+            Text(currentTrackArtist, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center, maxLines = 1, modifier = Modifier.fillMaxWidth())
+        }
+        if (!currentTrackAlbum.isNullOrBlank()) {
+            Text(currentTrackAlbum, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary, textAlign = TextAlign.Center, maxLines = 1, modifier = Modifier.fillMaxWidth())
+        }
         Spacer(Modifier.height(32.dp))
         Slider(value = if (durationMs > 0) (currentPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f, onValueChange = { onSeek((it * durationMs).toLong()) })
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(formatDuration(currentPositionMs)); Text(formatDuration(durationMs)) }
@@ -675,11 +717,11 @@ fun EmptyState(text: String, icon: androidx.compose.ui.graphics.vector.ImageVect
 }
 
 @Composable
-fun BulkImportDialog(onSave: (String) -> Unit, onFilePick: () -> Unit, onDismiss: () -> Unit) {
+fun BulkImportDialog(title: String, onSave: (String) -> Unit, onFilePick: () -> Unit, onDismiss: () -> Unit) {
     var text by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Bulk Import Radio Stations") },
+        title = { Text(title) },
         text = {
             Column {
                 Text("Paste stream URLs (one per line or comma-separated) or load a text file.", style = MaterialTheme.typography.bodySmall)
@@ -711,7 +753,7 @@ fun AddButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) 
 }
 
 @Composable
-fun PodcastDashboard(channels: List<AudioChannel>, recentEpisodes: List<com.michael.simplemusic.data.PodcastEpisode>, activeView: String, onChannelClick: (Int) -> Unit, onEpisodeClick: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onPlayEpisode: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onSwitchView: (String) -> Unit, onCreateChannel: () -> Unit, onDownloadAllNew: () -> Unit, onDeleteChannel: (Int) -> Unit, onUrlUpdate: (Int, String) -> Unit, pendingMarkPlayed: Set<Int>, onSwipeMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onUndoMarkPlayed: (Int) -> Unit) {
+fun PodcastDashboard(channels: List<AudioChannel>, recentEpisodes: List<com.michael.simplemusic.data.PodcastEpisode>, activeView: String, onChannelClick: (Int) -> Unit, onEpisodeClick: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onPlayEpisode: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onSwitchView: (String) -> Unit, onCreateChannel: () -> Unit, onDownloadAllNew: () -> Unit, onDeleteChannel: (Int) -> Unit, onUrlUpdate: (Int, String) -> Unit, pendingMarkPlayed: Set<Int>, onSwipeMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onUndoMarkPlayed: (Int) -> Unit, onBulkImport: () -> Unit) {
     Column(modifier = Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = if (activeView == "SHOWS") 0 else 1) {
             Tab(selected = activeView == "SHOWS", onClick = { onSwitchView("SHOWS") }, text = { Text("Shows") })
@@ -729,7 +771,17 @@ fun PodcastDashboard(channels: List<AudioChannel>, recentEpisodes: List<com.mich
                         onUrlUpdate = { newUrl -> onUrlUpdate(channel.id, newUrl) }
                     )
                 }
-                item { AddButton("Subscribe to RSS", onCreateChannel) }
+                item {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AddButton("Subscribe to RSS", onCreateChannel, modifier = Modifier.weight(1f))
+                        OutlinedButton(onClick = onBulkImport, modifier = Modifier.weight(1f).height(80.dp)) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.CloudUpload, null)
+                                Text("Bulk Import", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                }
             }
         } else {
             if (recentEpisodes.isEmpty()) Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { 

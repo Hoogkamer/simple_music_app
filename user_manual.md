@@ -23,7 +23,8 @@ Use Music Decks to manage different folders on your phone.
 
 ### Using Decks
 - **Switching:** Simply tap another deck to switch contexts. The app remembers your position in every deck independently.
-- **Controls:** Supports Shuffle, Repeat, and standard transport controls.
+- **Controls:** Supports Shuffle, Repeat, and standard transport controls. Metadata (Title, Artist, Album) is automatically displayed if available in the files.
+- **Change Folder:** Tap "Change" to select a new directory. The app will remember your last location.
 - **Management:** Long-press a Deck card to Rename or Delete it.
 
 ---
@@ -51,6 +52,7 @@ Subscribe to your favorite shows and listen offline.
 2.  Ensure you are on the **Shows** tab.
 3.  Tap **Subscribe to RSS**.
 4.  Paste the RSS feed URL and tap **Subscribe**.
+5.  Alternatively, use **Bulk Import** to add multiple RSS URLs at once from a list or text file.
 
 ### Managing Episodes
 - **Shows View:** See all your subscribed podcasts. Tap one to see its full episode list.

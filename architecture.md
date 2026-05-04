@@ -43,6 +43,8 @@ This table represents the primary "listening containers" (Decks, Stations, Podca
 | `streamUrl`         | String?  | Radio Stream URL or RSS Feed URL       |
 | `currentTrackUri`   | String?  | URI of the last played file/item       |
 | `currentTrackTitle` | String?  | Title of the last played item          |
+| `currentTrackArtist`| String?  | Artist of the last played item         |
+| `currentTrackAlbum` | String?  | Album of the last played item          |
 | `currentPositionMs` | Long     | Playback position for resumption       |
 | `currentTrackIndex` | Int      | Index in the track list                |
 | `currentTrackDurationMs` | Long | Duration of the current track          |
@@ -138,6 +140,7 @@ Manages complex states for multiple subscriptions and individual episode progres
 *   **Background Refresh:** All podcast feeds are refreshed on app launch to fetch new episodes.
 *   **Shows Tab:** Displays subscribed Podcasts.
     *   **Interaction:** Short-press leads to the Episode List.
+    *   **Bulk Import:** Allows adding multiple RSS feed URLs at once via clipboard or text file.
     *   **Episode List:** Shows episodes ordered by publication date (newest first). Includes a search filter for titles and descriptions.
     *   **Bulk Actions:** "Hide Played" toggles visibility of finished episodes. "Mark All Played" marks all episodes as finished, **excluding those that are downloaded, downloading, or queued** (to prevent accidental deletion of offline content).
 *   **Recent Tab:** A chronological feed of episodes from all subscriptions (last 14 days). Includes a "Download All" button for unplayed episodes within that window.

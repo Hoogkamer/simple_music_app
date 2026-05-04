@@ -103,6 +103,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val _streamMetadata = MutableStateFlow<String?>(null)
     val streamMetadata: StateFlow<String?> = _streamMetadata.asStateFlow()
 
+    private val _currentTrackArtist = MutableStateFlow<String?>(null)
+    val currentTrackArtist: StateFlow<String?> = _currentTrackArtist.asStateFlow()
+
+    private val _currentTrackAlbum = MutableStateFlow<String?>(null)
+    val currentTrackAlbum: StateFlow<String?> = _currentTrackAlbum.asStateFlow()
+
     private val _currentTrackIndex = MutableStateFlow(0)
     val currentTrackIndex: StateFlow<Int> = _currentTrackIndex.asStateFlow()
 
@@ -184,8 +190,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
             if (artist != null && title != null) {
                 _streamMetadata.value = "$artist - $title"
+                _currentTrackArtist.value = artist
             } else if (title != null) {
                 _streamMetadata.value = title
+            }
+            if (mediaMetadata.albumTitle != null) {
+                _currentTrackAlbum.value = mediaMetadata.albumTitle.toString()
             }
 
             // Auto-discovery for Radio Station names
@@ -279,6 +289,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             val item = controller.currentMediaItem ?: return
             val title = item.mediaMetadata.title?.toString() ?: ""
             if (title.isNotEmpty()) _currentTrackName.value = title
+            _currentTrackArtist.value = item.mediaMetadata.artist?.toString()
+            _currentTrackAlbum.value = item.mediaMetadata.albumTitle?.toString()
             _currentTrackIndex.value = controller.currentMediaItemIndex
             _currentMediaId.value = item.mediaId
         }
@@ -314,6 +326,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun loadChannelIntoPlayer(channel: AudioChannel, autoPlay: Boolean) {
         isRefreshing = true
         _currentTrackName.value = channel.currentTrackTitle ?: "Loading..."
+        _currentTrackArtist.value = channel.currentTrackArtist
+        _currentTrackAlbum.value = channel.currentTrackAlbum
         _currentPositionMs.value = channel.currentPositionMs
         _durationMs.value = channel.currentTrackDurationMs
 
@@ -333,7 +347,13 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                                 MediaItem.Builder()
                                     .setMediaId(file.uri.toString())
                                     .setUri(file.uri)
-                                    .setMediaMetadata(MediaMetadata.Builder().setTitle(file.displayName.removeSuffix(".mp3")).build())
+                                    .setMediaMetadata(
+                                        MediaMetadata.Builder()
+                                            .setTitle(file.title ?: file.displayName.removeSuffix(".mp3"))
+                                            .setArtist(file.artist)
+                                            .setAlbumTitle(file.album)
+                                            .build()
+                                    )
                                     .build()
                             }
                             val startIndex = files.indexOfFirst { it.uri.toString() == channel.currentTrackUri }.let { if (it != -1) it else channel.currentTrackIndex }.coerceIn(0, files.size - 1)
@@ -385,6 +405,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         val duration = controller.duration
         val mediaId = item?.mediaId
         val title = item?.mediaMetadata?.title?.toString()
+        val artist = item?.mediaMetadata?.artist?.toString()
+        val album = item?.mediaMetadata?.albumTitle?.toString()
 
         // Skip saving 0 if we are in a transition state (prevent resets)
         if (currentPosition == 0L && !isRefreshing) {
@@ -394,15 +416,27 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        withContext(Dispatchers.IO) {
-            val channel = repository.getChannelById(channelId) ?: return@withContext
-            repository.updateChannel(channel.copy(
+        val updatedChannel = withContext(Dispatchers.IO) {
+            val channel = repository.getChannelById(channelId) ?: return@withContext null
+            val updated = channel.copy(
                 currentTrackIndex = index,
                 currentTrackUri = mediaId ?: channel.currentTrackUri,
                 currentTrackTitle = title ?: channel.currentTrackTitle,
+                currentTrackArtist = artist ?: channel.currentTrackArtist,
+                currentTrackAlbum = album ?: channel.currentTrackAlbum,
                 currentPositionMs = currentPosition,
                 currentTrackDurationMs = if (duration > 0) duration else channel.currentTrackDurationMs
-            ))
+            )
+            repository.updateChannel(updated)
+            updated
+        }
+
+        if (updatedChannel != null) {
+            when (updatedChannel.type) {
+                ChannelType.FOLDER -> _activeMusicChannel.value = updatedChannel
+                ChannelType.RADIO -> _activeRadioChannel.value = updatedChannel
+                ChannelType.PODCAST -> _activePodcastChannel.value = updatedChannel
+            }
         }
     }
 
@@ -507,6 +541,24 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             
             newUrls.forEach { url ->
                 repository.insertChannel(AudioChannel(name = "Loading...", type = ChannelType.RADIO, streamUrl = url))
+            }
+        }
+    }
+
+    fun bulkAddPodcasts(urlsText: String) {
+        viewModelScope.launch {
+            val existingUrls = allChannels.value.filter { it.type == ChannelType.PODCAST }.mapNotNull { it.streamUrl }.toSet()
+            val lines = urlsText.split(Regex("[\\n\\r,;\\s]+"))
+            val newUrls = lines.map { it.trim() }
+                .filter { it.isNotEmpty() && it.startsWith("http") && it !in existingUrls }
+                .distinct()
+            
+            newUrls.forEach { url ->
+                val id = repository.insertChannel(AudioChannel(name = "Loading...", type = ChannelType.PODCAST, streamUrl = url))
+                val title = podcastRepository.refreshFeed(id.toInt(), url)
+                if (!title.isNullOrBlank()) {
+                    repository.updateChannel(repository.getChannelById(id.toInt())?.copy(name = title) ?: return@forEach)
+                }
             }
         }
     }
