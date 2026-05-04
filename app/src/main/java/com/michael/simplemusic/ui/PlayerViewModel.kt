@@ -118,6 +118,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val _repeatEnabled = MutableStateFlow(true)
     val repeatEnabled: StateFlow<Boolean> = _repeatEnabled.asStateFlow()
 
+    private val _playbackSpeed = MutableStateFlow(1.0f)
+    val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
+
     init {
         viewModelScope.launch { podcastRepository.clearDownloadingState() }
         allChannels = repository.allChannels
@@ -223,6 +226,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             if (!isRefreshing) viewModelScope.launch { saveCurrentPlaybackState() }
+        }
+
+        override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
+            _playbackSpeed.value = playbackParameters.speed
         }
     }
 
@@ -404,6 +411,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun seekTo(pos: Long) = mediaController?.seekTo(pos)
     fun toggleShuffle() { mediaController?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } }
     fun toggleRepeat() { mediaController?.let { it.repeatMode = if (it.repeatMode == Player.REPEAT_MODE_ALL) Player.REPEAT_MODE_OFF else Player.REPEAT_MODE_ALL } }
+    fun setPlaybackSpeed(speed: Float) { mediaController?.setPlaybackSpeed(speed) }
 
     fun createChannel(name: String, type: ChannelType = ChannelType.FOLDER, streamUrl: String? = null) {
         viewModelScope.launch {
@@ -563,14 +571,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 // 3. Load into ExoPlayer
                 mediaController?.let { controller ->
                     controller.stop()
+                    controller.clearMediaItems()
                     val uri = episode.localPath ?: episode.streamUrl
                     val item = MediaItem.Builder()
                         .setMediaId(episode.id.toString())
                         .setUri(uri)
                         .setMediaMetadata(MediaMetadata.Builder().setTitle(episode.title).build())
                         .build()
-                    controller.setMediaItem(item)
-                    controller.seekTo(episode.playbackPositionMs)
+                    controller.setMediaItems(listOf(item), 0, episode.playbackPositionMs)
                     controller.prepare()
                     controller.play()
                 }

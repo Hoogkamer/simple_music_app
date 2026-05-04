@@ -66,6 +66,7 @@ fun PlayerScreen(
     
     val activeChannelId by viewModel.activeChannelId.collectAsStateWithLifecycle()
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
+    val playbackSpeed by viewModel.playbackSpeed.collectAsStateWithLifecycle()
     val currentTrackName by viewModel.currentTrackName.collectAsStateWithLifecycle()
     val streamMetadata by viewModel.streamMetadata.collectAsStateWithLifecycle()
     val currentPositionMs by viewModel.currentPositionMs.collectAsStateWithLifecycle()
@@ -238,6 +239,9 @@ fun PlayerScreen(
                                 } else if (channel?.type == ChannelType.PODCAST) {
                                     currentDestination = NavigationDestination.PODCASTS
                                     isPlayerVisible = true
+                                } else if (channel?.type == ChannelType.RADIO) {
+                                    currentDestination = NavigationDestination.RADIO
+                                    isPlayerVisible = false
                                 }
                             },
                             color = MaterialTheme.colorScheme.secondaryContainer
@@ -318,6 +322,7 @@ fun PlayerScreen(
                         PodcastPlayer(
                             activeEpisode = activePodcastEpisode!!,
                             isPlaying = isPlaying && activeChannelId == activePodcastEpisode?.channelId,
+                            playbackSpeed = playbackSpeed,
                             currentPositionMs = if (activeChannelId == activePodcastEpisode?.channelId && durationMs > 0) currentPositionMs else activePodcastEpisode!!.playbackPositionMs,
                             durationMs = if (activeChannelId == activePodcastEpisode?.channelId && durationMs > 0) durationMs else activePodcastEpisode!!.durationMs,
                             onPlayPause = {
@@ -329,7 +334,8 @@ fun PlayerScreen(
                             },
                             onSkipBack = { if (activeChannelId == activePodcastEpisode?.channelId) viewModel.skipBack() },
                             onSkipForward = { if (activeChannelId == activePodcastEpisode?.channelId) viewModel.skipForward() },
-                            onSeek = { if (activeChannelId == activePodcastEpisode?.channelId) viewModel.seekTo(it) }
+                            onSeek = { if (activeChannelId == activePodcastEpisode?.channelId) viewModel.seekTo(it) },
+                            onSpeedChange = { viewModel.setPlaybackSpeed(it) }
                         )
                     } else {
                         when (podcastNav) {
@@ -369,6 +375,7 @@ fun PlayerScreen(
                                     episode = episode,
                                     isActive = activeChannelId == episode.channelId && activePodcastEpisode?.id == episode.id,
                                     isPlaying = isPlaying,
+                                    playbackSpeed = playbackSpeed,
                                     currentPositionMs = currentPositionMs,
                                     durationMs = durationMs,
                                     onPlay = { viewModel.playPodcastEpisode(it) },
@@ -376,6 +383,7 @@ fun PlayerScreen(
                                     onSeek = { viewModel.seekTo(it) },
                                     onSkipBack = { viewModel.skipBack() },
                                     onSkipForward = { viewModel.skipForward() },
+                                    onSpeedChange = { viewModel.setPlaybackSpeed(it) },
                                     onDownload = { viewModel.downloadEpisode(it) },
                                     onDelete = { viewModel.deleteEpisodeFile(it) },
                                     onMarkPlayed = { viewModel.markEpisodeAsPlayed(it) },
@@ -890,6 +898,7 @@ fun EpisodeDetailScreen(
     episode: com.michael.simplemusic.data.PodcastEpisode,
     isActive: Boolean,
     isPlaying: Boolean,
+    playbackSpeed: Float,
     currentPositionMs: Long,
     durationMs: Long,
     onPlay: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
@@ -897,6 +906,7 @@ fun EpisodeDetailScreen(
     onSeek: (Long) -> Unit,
     onSkipBack: () -> Unit,
     onSkipForward: () -> Unit,
+    onSpeedChange: (Float) -> Unit,
     onDownload: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
     onDelete: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
     onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
@@ -912,12 +922,14 @@ fun EpisodeDetailScreen(
             PodcastPlayer(
                 activeEpisode = episode,
                 isPlaying = isPlaying,
+                playbackSpeed = playbackSpeed,
                 currentPositionMs = currentPositionMs,
                 durationMs = if (durationMs > 0) durationMs else episode.durationMs,
                 onPlayPause = { if (isPlaying) onPause() else onPlay(episode) },
                 onSkipBack = onSkipBack,
                 onSkipForward = onSkipForward,
-                onSeek = onSeek
+                onSeek = onSeek,
+                onSpeedChange = onSpeedChange
             )
             Spacer(Modifier.height(16.dp))
         }
@@ -968,7 +980,7 @@ fun PodcastListScreen(channels: List<AudioChannel>, onChannelClick: (Int) -> Uni
 }
 
 @Composable
-fun PodcastPlayer(activeEpisode: com.michael.simplemusic.data.PodcastEpisode, isPlaying: Boolean, currentPositionMs: Long, durationMs: Long, onPlayPause: () -> Unit, onSkipBack: () -> Unit, onSkipForward: () -> Unit, onSeek: (Long) -> Unit) {
+fun PodcastPlayer(activeEpisode: com.michael.simplemusic.data.PodcastEpisode, isPlaying: Boolean, playbackSpeed: Float, currentPositionMs: Long, durationMs: Long, onPlayPause: () -> Unit, onSkipBack: () -> Unit, onSkipForward: () -> Unit, onSeek: (Long) -> Unit, onSpeedChange: (Float) -> Unit) {
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(activeEpisode.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, textAlign = TextAlign.Center)
         Spacer(Modifier.height(16.dp))
@@ -978,6 +990,19 @@ fun PodcastPlayer(activeEpisode: com.michael.simplemusic.data.PodcastEpisode, is
         }
         Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
+            TextButton(onClick = {
+                val nextSpeed = when {
+                    playbackSpeed < 0.8f -> 0.8f
+                    playbackSpeed < 1.0f -> 1.0f
+                    playbackSpeed < 1.2f -> 1.2f
+                    playbackSpeed < 1.5f -> 1.5f
+                    playbackSpeed < 2.0f -> 2.0f
+                    else -> 0.5f
+                }
+                onSpeedChange(nextSpeed)
+            }) {
+                Text("${playbackSpeed}x", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            }
             IconButton(onClick = onSkipBack) { Icon(Icons.Default.Replay10, null, modifier = Modifier.size(48.dp)) } // Using Replay10 as proxy for 15
             FilledIconButton(onClick = onPlayPause, modifier = Modifier.size(64.dp)) { Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, null, modifier = Modifier.size(40.dp)) }
             IconButton(onClick = onSkipForward) { Icon(Icons.Default.Forward30, null, modifier = Modifier.size(48.dp)) }

@@ -12,10 +12,17 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.michael.simplemusic.MainActivity
 import com.michael.simplemusic.widget.PlayerWidgetProvider
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MusicService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
+    private val serviceScope = CoroutineScope(Dispatchers.Main)
+    private var widgetUpdateJob: Job? = null
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
@@ -62,6 +69,30 @@ class MusicService : MediaSessionService() {
     }
 
     private fun updateWidget(player: Player) {
+        broadcastWidgetUpdate(player)
+        
+        if (player.isPlaying) {
+            if (widgetUpdateJob == null || widgetUpdateJob?.isActive != true) {
+                widgetUpdateJob = serviceScope.launch {
+                    while (true) {
+                        delay(1000)
+                        mediaSession?.player?.let { p ->
+                            if (p.isPlaying) {
+                                broadcastWidgetUpdate(p)
+                            } else {
+                                widgetUpdateJob?.cancel()
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            widgetUpdateJob?.cancel()
+            widgetUpdateJob = null
+        }
+    }
+
+    private fun broadcastWidgetUpdate(player: Player) {
         val intent = Intent(this, com.michael.simplemusic.widget.PlayerWidgetProvider::class.java)
         intent.action = com.michael.simplemusic.widget.PlayerWidgetProvider.ACTION_UPDATE_WIDGET
         
@@ -71,6 +102,8 @@ class MusicService : MediaSessionService() {
         intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_TITLE, title)
         intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_SUBTITLE, subtitle)
         intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_IS_PLAYING, player.isPlaying)
+        intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_POSITION, player.currentPosition)
+        intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_DURATION, player.duration)
         
         sendBroadcast(intent)
     }

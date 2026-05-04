@@ -25,6 +25,8 @@ class PlayerWidgetProvider : AppWidgetProvider() {
             val title = intent.getStringExtra(EXTRA_TITLE) ?: "Total Audio Hub"
             val subtitle = intent.getStringExtra(EXTRA_SUBTITLE) ?: "Not playing"
             val isPlaying = intent.getBooleanExtra(EXTRA_IS_PLAYING, false)
+            val position = intent.getLongExtra(EXTRA_POSITION, 0L)
+            val duration = intent.getLongExtra(EXTRA_DURATION, 0L)
             val appWidgetManager = AppWidgetManager.getInstance(context)
             val appWidgetIds = appWidgetManager.getAppWidgetIds(ComponentName(context, PlayerWidgetProvider::class.java))
             for (id in appWidgetIds) {
@@ -32,6 +34,7 @@ class PlayerWidgetProvider : AppWidgetProvider() {
                 views.setTextViewText(R.id.widget_title, title)
                 views.setTextViewText(R.id.widget_subtitle, subtitle)
                 views.setImageViewResource(R.id.widget_btn_play_pause, if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play)
+                views.setProgressBar(R.id.widget_progress, duration.toInt(), position.toInt(), false)
                 appWidgetManager.updateAppWidget(id, views)
             }
         }
@@ -45,6 +48,8 @@ class PlayerWidgetProvider : AppWidgetProvider() {
         const val EXTRA_TITLE = "extra_title"
         const val EXTRA_SUBTITLE = "extra_subtitle"
         const val EXTRA_IS_PLAYING = "extra_is_playing"
+        const val EXTRA_POSITION = "extra_position"
+        const val EXTRA_DURATION = "extra_duration"
 
         fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
             val views = getRemoteViews(context)
