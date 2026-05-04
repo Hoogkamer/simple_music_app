@@ -8,6 +8,9 @@ interface AudioChannelDao {
     @Query("SELECT * FROM audio_channels ORDER BY lastPlayedTime DESC")
     fun getAllChannels(): Flow<List<AudioChannel>>
 
+    @Query("SELECT * FROM audio_channels ORDER BY lastPlayedTime DESC")
+    suspend fun getAllChannelsSync(): List<AudioChannel>
+
     @Query("SELECT * FROM audio_channels WHERE id = :id")
     suspend fun getChannelById(id: Int): AudioChannel?
 

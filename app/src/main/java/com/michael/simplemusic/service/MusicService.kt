@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MusicService : MediaSessionService() {
 
@@ -96,16 +97,51 @@ class MusicService : MediaSessionService() {
         val intent = Intent(this, com.michael.simplemusic.widget.PlayerWidgetProvider::class.java)
         intent.action = com.michael.simplemusic.widget.PlayerWidgetProvider.ACTION_UPDATE_WIDGET
         
-        val title = player.mediaMetadata.title?.toString() ?: "Total Audio Hub"
-        val subtitle = player.mediaMetadata.artist?.toString() ?: if (player.mediaMetadata.title != null) "Playing" else "Not playing"
-        
-        intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_TITLE, title)
-        intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_SUBTITLE, subtitle)
-        intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_IS_PLAYING, player.isPlaying)
-        intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_POSITION, player.currentPosition)
-        intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_DURATION, player.duration)
-        
-        sendBroadcast(intent)
+        // Capture metadata on main thread
+        val metadata = player.mediaMetadata
+        val isPlaying = player.isPlaying
+        val position = player.currentPosition
+        val duration = player.duration
+
+        serviceScope.launch(Dispatchers.IO) {
+            val db = (application as com.michael.simplemusic.SimpleMusicApp).database
+            val config = db.appConfigDao().getConfigSync() ?: com.michael.simplemusic.data.AppConfig()
+            val category = config.lastCategory
+
+            val title: String
+            val subtitle: String
+            val iconRes: Int
+
+            when (category) {
+                "PODCASTS" -> {
+                    title = metadata.albumTitle?.toString() ?: "Podcast"
+                    subtitle = metadata.title?.toString() ?: "Unknown Episode"
+                    iconRes = com.michael.simplemusic.R.drawable.ic_widget_podcast
+                }
+                "RADIO" -> {
+                    title = metadata.title?.toString() ?: "Radio"
+                    subtitle = metadata.artist?.toString() ?: "Live Stream"
+                    iconRes = com.michael.simplemusic.R.drawable.ic_widget_radio
+                }
+                else -> { // MUSIC
+                    title = metadata.title?.toString() ?: "Total Audio Hub"
+                    subtitle = metadata.artist?.toString() ?: "Unknown Artist"
+                    iconRes = com.michael.simplemusic.R.drawable.ic_widget_music
+                }
+            }
+            
+            withContext(Dispatchers.Main) {
+                intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_TITLE, title)
+                intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_SUBTITLE, subtitle)
+                intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_IS_PLAYING, isPlaying)
+                intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_POSITION, position)
+                intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_DURATION, duration)
+                intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_CATEGORY, category)
+                intent.putExtra(com.michael.simplemusic.widget.PlayerWidgetProvider.EXTRA_ICON_RES, iconRes)
+                
+                sendBroadcast(intent)
+            }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
@@ -130,7 +166,7 @@ class MusicService : MediaSessionService() {
             }
             PlayerWidgetProvider.ACTION_REWIND -> {
                 mediaSession?.player?.let { player ->
-                    player.seekTo(player.currentPosition - 15000)
+                    player.seekTo((player.currentPosition - 15000).coerceAtLeast(0))
                 }
             }
             PlayerWidgetProvider.ACTION_FAST_FORWARD -> {
@@ -138,8 +174,64 @@ class MusicService : MediaSessionService() {
                     player.seekTo(player.currentPosition + 30000)
                 }
             }
+            PlayerWidgetProvider.ACTION_SKIP_NEXT -> {
+                handleSkip(true)
+            }
+            PlayerWidgetProvider.ACTION_SKIP_PREVIOUS -> {
+                handleSkip(false)
+            }
         }
         return super.onStartCommand(intent, flags, startId)
+    }
+
+    private fun handleSkip(forward: Boolean) {
+        val player = mediaSession?.player ?: return
+        serviceScope.launch(Dispatchers.IO) {
+            val db = (application as com.michael.simplemusic.SimpleMusicApp).database
+            val config = db.appConfigDao().getConfigSync() ?: return@launch
+            
+            when (config.lastCategory) {
+                "MUSIC" -> {
+                    withContext(Dispatchers.Main) {
+                        if (forward) player.seekToNext() else player.seekToPrevious()
+                    }
+                }
+                "RADIO" -> {
+                    val channels = db.audioChannelDao().getAllChannelsSync().filter { it.type == com.michael.simplemusic.data.ChannelType.RADIO }
+                    if (channels.isNotEmpty()) {
+                        val currentIndex = channels.indexOfFirst { it.id == config.activeRadioChannelId }
+                        val nextIndex = if (forward) (currentIndex + 1) % channels.size else (currentIndex - 1 + channels.size) % channels.size
+                        val nextChannel = channels[nextIndex]
+                        
+                        // We need to notify the UI to load this channel
+                        // For now, let's just update the DB and broadcast a "LOAD" intent or similar
+                        // Actually, the simplest is to just send an intent that MainActivity/ViewModel can handle
+                        val intent = Intent(this@MusicService, MainActivity::class.java).apply {
+                            action = "com.michael.simplemusic.ACTION_LOAD_CHANNEL"
+                            putExtra("channel_id", nextChannel.id)
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        startActivity(intent)
+                    }
+                }
+                "PODCASTS" -> {
+                    val recentThreshold = System.currentTimeMillis() - (14 * 24 * 60 * 60 * 1000L)
+                    val episodes = db.podcastEpisodeDao().getRecentEpisodesSync(recentThreshold)
+                    if (episodes.isNotEmpty()) {
+                        val currentIndex = episodes.indexOfFirst { it.id == config.activePodcastEpisodeId }
+                        val nextIndex = if (forward) (currentIndex + 1) % episodes.size else (currentIndex - 1 + episodes.size) % episodes.size
+                        val nextEpisode = episodes[nextIndex]
+                        
+                        val intent = Intent(this@MusicService, MainActivity::class.java).apply {
+                            action = "com.michael.simplemusic.ACTION_LOAD_EPISODE"
+                            putExtra("episode_id", nextEpisode.id)
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        startActivity(intent)
+                    }
+                }
+            }
+        }
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {

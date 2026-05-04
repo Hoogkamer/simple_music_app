@@ -32,6 +32,9 @@ interface PodcastEpisodeDao {
     @Query("SELECT * FROM podcast_episodes WHERE (downloadStatus IN (1, 2, 3) OR (pubDate >= :recentThreshold AND isFinished = 0)) AND isFinished = 0 ORDER BY pubDate DESC")
     fun getRecentEpisodes(recentThreshold: Long): Flow<List<PodcastEpisode>>
 
+    @Query("SELECT * FROM podcast_episodes WHERE (downloadStatus IN (1, 2, 3) OR (pubDate >= :recentThreshold AND isFinished = 0)) AND isFinished = 0 ORDER BY pubDate DESC")
+    suspend fun getRecentEpisodesSync(recentThreshold: Long): List<PodcastEpisode>
+
     @Query("UPDATE podcast_episodes SET downloadStatus = 0 WHERE downloadStatus = 2")
     suspend fun clearDownloadingState()
 

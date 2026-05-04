@@ -4,18 +4,34 @@
     android:layout_height="match_parent"
     android:background="@android:color/background_dark"
     android:orientation="vertical"
-    android:padding="8dp">
+    android:padding="12dp">
 
-    <TextView
-        android:id="@+id/widget_title"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Total Audio Hub"
-        android:textColor="@android:color/white"
-        android:textSize="14sp"
-        android:textStyle="bold"
-        android:maxLines="1"
-        android:ellipsize="end" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <ImageView
+            android:id="@+id/widget_type_icon"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:layout_marginEnd="8dp"
+            android:src="@drawable/ic_widget_music"
+            android:tint="@android:color/darker_gray" />
+
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Total Audio Hub"
+            android:textColor="@android:color/white"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/widget_subtitle"
@@ -30,10 +46,12 @@
         android:ellipsize="end" />
 
     <LinearLayout
+        android:id="@+id/widget_progress_container"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:layout_marginTop="4dp">
+        android:layout_marginTop="8dp"
+        android:gravity="center_vertical">
 
         <TextView
             android:id="@+id/widget_current_time"
@@ -63,6 +81,7 @@
             android:textColor="@android:color/darker_gray"
             android:textSize="10sp" />
     </LinearLayout>
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -71,9 +90,19 @@
         android:layout_marginTop="8dp">
 
         <ImageButton
+            android:id="@+id/widget_btn_previous"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_media_previous"
+            android:contentDescription="Previous"
+            android:tint="@android:color/white" />
+
+        <ImageButton
             android:id="@+id/widget_btn_rewind"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="4dp"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_media_rew"
             android:contentDescription="Rewind 15s"
@@ -92,11 +121,21 @@
 
         <ImageButton
             android:id="@+id/widget_btn_fast_forward"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginEnd="4dp"
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_media_ff"
             android:contentDescription="Forward 30s"
+            android:tint="@android:color/white" />
+
+        <ImageButton
+            android:id="@+id/widget_btn_next"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_media_next"
+            android:contentDescription="Next"
             android:tint="@android:color/white" />
     </LinearLayout>
 </LinearLayout>

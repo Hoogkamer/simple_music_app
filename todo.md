@@ -52,11 +52,11 @@ For every completed item, ensure:
 
 ### Common module
 
-- [ ] In the widget we have fast forward and rewind buttons. For podcast they should skip 30 sec forwards, and 10 backwards, which is already there. For musid and radio they should not be there.
-- [ ] add skip next and previous buttons to the widget, for podcast they should skip to the next/previous episode in the Recent list. For music they should go to the next/previous song in the playlist. For radio they should go to the next/previous station in the list.
-- [ ] in the widget show also the podcast (show title, and episode title), music (song title, and artist), and radio (station name).
-- [ ] in the widget show the icons we use at the bottom of the player window for the different media types.
-- [ ] when clicking on the widget it should open the app in the tab of which is currently active (playing or paused)
+- [x] In the widget we have fast forward and rewind buttons. For podcast they should skip 30 sec forwards, and 15 backwards, which is already there. For music and radio they should not be there.
+- [x] add skip next and previous buttons to the widget, for podcast they should skip to the next/previous episode in the Recent list. For music they should go to the next/previous song in the playlist. For radio they should go to the next/previous station in the list.
+- [x] in the widget show also the podcast (show title, and episode title), music (song title, and artist), and radio (station name).
+- [x] in the widget show the icons we use at the bottom of the player window for the different media types.
+- [x] when clicking on the widget it should open the app in the tab of which is currently active (playing or paused)
 
 ## Technical Debt & Chores
 

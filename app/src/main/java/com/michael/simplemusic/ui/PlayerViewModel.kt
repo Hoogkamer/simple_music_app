@@ -65,7 +65,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val _activePodcastChannel = MutableStateFlow<AudioChannel?>(null)
     val activePodcastChannel: StateFlow<AudioChannel?> = _activePodcastChannel.asStateFlow()
 
-    private val _podcastView = MutableStateFlow("SHOWS")
+    private val _podcastView = MutableStateFlow("RECENT")
     val podcastView: StateFlow<String> = _podcastView.asStateFlow()
 
     private val _activeChannelId = MutableStateFlow<Int?>(null)
@@ -444,6 +444,23 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun skipBack() = mediaController?.let { it.seekTo((it.currentPosition - 15000).coerceAtLeast(0)) }
     fun skipForward() = mediaController?.let { it.seekTo(it.currentPosition + 30000) }
     fun stopRadio() = mediaController?.stop()
+
+    fun stopAllPlayback() {
+        mediaController?.stop()
+        mediaController?.clearMediaItems()
+        _activeChannelId.value = null
+        _activeEpisodeId.value = null
+        _activeMusicChannel.value = null
+        _activeRadioChannel.value = null
+        _activePodcastChannel.value = null
+        _podcastView.value = "RECENT"
+        updateConfig { it.copy(
+            activeMusicChannelId = null, 
+            activeRadioChannelId = null, 
+            activePodcastChannelId = null, 
+            activePodcastEpisodeId = null
+        ) }
+    }
     
     fun next() = mediaController?.seekToNext()
     fun previous() = mediaController?.seekToPrevious()
@@ -596,7 +613,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun updateConfig(update: (AppConfig) -> AppConfig) {
-        viewModelScope.launch { configDao.saveConfig(update(_appConfig.value)) }
+        viewModelScope.launch { 
+            val current = configDao.getConfigSync() ?: _appConfig.value
+            configDao.saveConfig(update(current)) 
+        }
+    }
+
+    fun setCategory(category: String) {
+        updateConfig { it.copy(lastCategory = category) }
     }
 
     fun setActiveEpisode(episode: PodcastEpisode?) {
@@ -617,7 +641,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 
                 updateConfig { it.copy(
                     activePodcastChannelId = episode.channelId,
-                    lastCategory = ChannelType.PODCAST.name
+                    lastCategory = "PODCASTS"
                 ) }
 
                 // 2. Update UI tracking
@@ -651,6 +675,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 isRefreshing = false
                 updateCurrentTrackInfo()
                 saveCurrentPlaybackState()
+            }
+        }
+    }
+
+    fun playEpisodeById(episodeId: Int) {
+        viewModelScope.launch {
+            podcastRepository.getEpisodeById(episodeId)?.let { episode ->
+                playPodcastEpisode(episode)
             }
         }
     }

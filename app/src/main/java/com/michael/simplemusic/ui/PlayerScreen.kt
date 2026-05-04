@@ -114,11 +114,25 @@ fun PlayerScreen(
         mutableStateOf(
             when (appConfig.lastCategory) {
                 "MUSIC" -> appConfig.activeMusicChannelId != null
-                "RADIO" -> appConfig.activeRadioChannelId != null
-                "PODCASTS" -> appConfig.activePodcastChannelId != null
+                "RADIO" -> false // Radio always uses mini-player
+                "PODCASTS" -> appConfig.activePodcastEpisodeId != null
                 else -> false
             }
         ) 
+    }
+
+    LaunchedEffect(appConfig.lastCategory) {
+        val newDest = when(appConfig.lastCategory) {
+            "RADIO" -> NavigationDestination.RADIO
+            "PODCASTS" -> NavigationDestination.PODCASTS
+            else -> NavigationDestination.MUSIC
+        }
+        if (newDest != currentDestination) {
+            currentDestination = newDest
+            if (newDest == NavigationDestination.PODCASTS && appConfig.activePodcastEpisodeId != null) {
+                podcastNav = PodcastNavigation.EPISODE_DETAIL
+            }
+        }
     }
 
     val folderPickerLauncher = rememberLauncherForActivityResult(
@@ -242,7 +256,12 @@ fun PlayerScreen(
         },
         bottomBar = {
             Column {
-                if (!isPlayerVisible || currentDestination != NavigationDestination.MUSIC) {
+                val showMiniPlayer = when (currentDestination) {
+                    NavigationDestination.MUSIC -> !isPlayerVisible
+                    NavigationDestination.RADIO -> true
+                    NavigationDestination.PODCASTS -> !isPlayerVisible && podcastNav != PodcastNavigation.EPISODE_DETAIL
+                }
+                if (showMiniPlayer) {
                     AnimatedVisibility(
                         visible = activeChannelId != null,
                         enter = slideInVertically { it } + fadeIn(),
@@ -284,9 +303,43 @@ fun PlayerScreen(
                     }
                 }
                 NavigationBar {
-                    NavigationBarItem(selected = currentDestination == NavigationDestination.MUSIC, onClick = { currentDestination = NavigationDestination.MUSIC }, icon = { Icon(Icons.Default.LibraryMusic, null) }, label = { Text("Music") })
-                    NavigationBarItem(selected = currentDestination == NavigationDestination.RADIO, onClick = { currentDestination = NavigationDestination.RADIO }, icon = { Icon(Icons.Default.Radio, null) }, label = { Text("Radio") })
-                    NavigationBarItem(selected = currentDestination == NavigationDestination.PODCASTS, onClick = { currentDestination = NavigationDestination.PODCASTS }, icon = { Icon(Icons.Default.Podcasts, null) }, label = { Text("Podcasts") })
+                    NavigationBarItem(
+                        selected = currentDestination == NavigationDestination.MUSIC, 
+                        onClick = { 
+                            if (currentDestination != NavigationDestination.MUSIC) {
+                                viewModel.stopAllPlayback()
+                                currentDestination = NavigationDestination.MUSIC
+                                isPlayerVisible = false
+                            }
+                        }, 
+                        icon = { Icon(Icons.Default.LibraryMusic, null) }, 
+                        label = { Text("Music") }
+                    )
+                    NavigationBarItem(
+                        selected = currentDestination == NavigationDestination.RADIO, 
+                        onClick = { 
+                            if (currentDestination != NavigationDestination.RADIO) {
+                                viewModel.stopAllPlayback()
+                                currentDestination = NavigationDestination.RADIO
+                                isPlayerVisible = false
+                            }
+                        }, 
+                        icon = { Icon(Icons.Default.Radio, null) }, 
+                        label = { Text("Radio") }
+                    )
+                    NavigationBarItem(
+                        selected = currentDestination == NavigationDestination.PODCASTS, 
+                        onClick = { 
+                            if (currentDestination != NavigationDestination.PODCASTS) {
+                                viewModel.stopAllPlayback()
+                                currentDestination = NavigationDestination.PODCASTS
+                                isPlayerVisible = false
+                                podcastNav = PodcastNavigation.DASHBOARD
+                            }
+                        }, 
+                        icon = { Icon(Icons.Default.Podcasts, null) }, 
+                        label = { Text("Podcasts") }
+                    )
                 }
             }
         }
@@ -386,38 +439,39 @@ fun PlayerScreen(
                                     onBulkImport = { showBulkImportPodcasts = true }
                                 )
                             }
-                        PodcastNavigation.SHOW_DETAIL -> {
-                            PodcastShowDetail(
-                                episodes = if (appConfig.hidePlayedEpisodes) podcastEpisodes.filter { !it.isFinished } else podcastEpisodes,
-                                onEpisodeClick = { viewModel.setActiveEpisode(it); cameFromRecent = false; podcastNav = PodcastNavigation.EPISODE_DETAIL },
-                                onPlayEpisode = { viewModel.playPodcastEpisode(it) },
-                                onDownload = { viewModel.downloadEpisode(it) },
-                                onDelete = { viewModel.deleteEpisodeFile(it) },
-                                onMarkPlayed = { viewModel.markAsPlayedWithUndo(it) },
-                                pendingMarkPlayed = pendingMarkPlayed,
-                                onUndoMarkPlayed = { viewModel.undoMarkAsPlayed(it) }
-                            )
-                        }
-                        PodcastNavigation.EPISODE_DETAIL -> {
-                            activePodcastEpisode?.let { episode ->
-                                EpisodeDetailScreen(
-                                    episode = episode,
-                                    isActive = currentMediaId == episode.id.toString(),
-                                    isPlaying = isPlaying,
-                                    playbackSpeed = playbackSpeed,
-                                    currentPositionMs = currentPositionMs,
-                                    durationMs = durationMs,
-                                    onPlay = { viewModel.playPodcastEpisode(it) },
-                                    onPause = { viewModel.playPause() },
-                                    onSeek = { viewModel.seekTo(it) },
-                                    onSkipBack = { viewModel.skipBack() },
-                                    onSkipForward = { viewModel.skipForward() },
-                                    onSpeedChange = { viewModel.setPlaybackSpeed(it) },
+                            PodcastNavigation.SHOW_DETAIL -> {
+                                PodcastShowDetail(
+                                    episodes = if (appConfig.hidePlayedEpisodes) podcastEpisodes.filter { !it.isFinished } else podcastEpisodes,
+                                    onEpisodeClick = { viewModel.setActiveEpisode(it); cameFromRecent = false; podcastNav = PodcastNavigation.EPISODE_DETAIL },
+                                    onPlayEpisode = { viewModel.playPodcastEpisode(it) },
                                     onDownload = { viewModel.downloadEpisode(it) },
                                     onDelete = { viewModel.deleteEpisodeFile(it) },
-                                    onMarkPlayed = { viewModel.markEpisodeAsPlayed(it) },
-                                    onMarkUnplayed = { viewModel.markEpisodeAsUnplayed(it) }
+                                    onMarkPlayed = { viewModel.markAsPlayedWithUndo(it) },
+                                    pendingMarkPlayed = pendingMarkPlayed,
+                                    onUndoMarkPlayed = { viewModel.undoMarkAsPlayed(it) }
                                 )
+                            }
+                            PodcastNavigation.EPISODE_DETAIL -> {
+                                activePodcastEpisode?.let { episode ->
+                                    EpisodeDetailScreen(
+                                        episode = episode,
+                                        isActive = currentMediaId == episode.id.toString(),
+                                        isPlaying = isPlaying,
+                                        playbackSpeed = playbackSpeed,
+                                        currentPositionMs = currentPositionMs,
+                                        durationMs = durationMs,
+                                        onPlay = { viewModel.playPodcastEpisode(it) },
+                                        onPause = { viewModel.playPause() },
+                                        onSeek = { viewModel.seekTo(it) },
+                                        onSkipBack = { viewModel.skipBack() },
+                                        onSkipForward = { viewModel.skipForward() },
+                                        onSpeedChange = { viewModel.setPlaybackSpeed(it) },
+                                        onDownload = { viewModel.downloadEpisode(it) },
+                                        onDelete = { viewModel.deleteEpisodeFile(it) },
+                                        onMarkPlayed = { viewModel.markEpisodeAsPlayed(it) },
+                                        onMarkUnplayed = { viewModel.markEpisodeAsUnplayed(it) }
+                                    )
+                                }
                             }
                         }
                     }
@@ -444,7 +498,6 @@ fun PlayerScreen(
             onFilePick = { importPodcastLauncher.launch(arrayOf("text/*", "application/*")); showBulkImportPodcasts = false },
             onDismiss = { showBulkImportPodcasts = false }
         )
-        }
     }
 }
 
