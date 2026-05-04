@@ -90,7 +90,16 @@ class PodcastRepository(private val context: android.content.Context, private va
 
     suspend fun markAsUnplayed(episode: PodcastEpisode) {
         withContext(Dispatchers.IO) {
-            dao.updateEpisode(episode.copy(isFinished = false))
+            episode.localPath?.let { path ->
+                val file = File(path)
+                if (file.exists()) file.delete()
+            }
+            dao.updateEpisode(episode.copy(
+                isFinished = false,
+                localPath = null,
+                downloadStatus = PodcastEpisode.STATUS_IDLE,
+                downloadProgress = 0
+            ))
         }
     }
 

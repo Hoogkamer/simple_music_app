@@ -77,6 +77,7 @@ fun PlayerScreen(
     val podcastView by viewModel.podcastView.collectAsStateWithLifecycle()
     val activePodcastEpisode by viewModel.activeEpisode.collectAsStateWithLifecycle()
     val radioSearchResults by viewModel.radioSearchResults.collectAsStateWithLifecycle()
+    val currentMediaId by viewModel.currentMediaId.collectAsStateWithLifecycle()
 
     var showAddStation by remember { mutableStateOf(false) }
     var showBulkImport by remember { mutableStateOf(false) }
@@ -321,10 +322,10 @@ fun PlayerScreen(
                     if (isPlayerVisible && activePodcastEpisode != null) {
                         PodcastPlayer(
                             activeEpisode = activePodcastEpisode!!,
-                            isPlaying = isPlaying && activeChannelId == activePodcastEpisode?.channelId,
+                            isPlaying = isPlaying && currentMediaId == activePodcastEpisode?.id?.toString(),
                             playbackSpeed = playbackSpeed,
-                            currentPositionMs = if (activeChannelId == activePodcastEpisode?.channelId && durationMs > 0) currentPositionMs else activePodcastEpisode!!.playbackPositionMs,
-                            durationMs = if (activeChannelId == activePodcastEpisode?.channelId && durationMs > 0) durationMs else activePodcastEpisode!!.durationMs,
+                            currentPositionMs = if (currentMediaId == activePodcastEpisode?.id?.toString() && durationMs > 0) currentPositionMs else activePodcastEpisode!!.playbackPositionMs,
+                            durationMs = if (currentMediaId == activePodcastEpisode?.id?.toString() && durationMs > 0) durationMs else activePodcastEpisode!!.durationMs,
                             onPlayPause = {
                                 if (activeChannelId == activePodcastEpisode?.channelId) {
                                     viewModel.playPause()
@@ -346,6 +347,7 @@ fun PlayerScreen(
                                     activeView = podcastView,
                                     onChannelClick = { id -> selectedPodcastId = id; viewModel.selectChannel(id); podcastNav = PodcastNavigation.SHOW_DETAIL },
                                     onEpisodeClick = { viewModel.setActiveEpisode(it); cameFromRecent = true; podcastNav = PodcastNavigation.EPISODE_DETAIL },
+                                    onPlayEpisode = { viewModel.playPodcastEpisode(it) },
                                     onMarkPlayed = { viewModel.markEpisodeAsPlayed(it) },
                                     onSwitchView = { viewModel.setPodcastView(it) },
                                     onCreateChannel = { showAddPodcast = true },
@@ -373,7 +375,7 @@ fun PlayerScreen(
                             activePodcastEpisode?.let { episode ->
                                 EpisodeDetailScreen(
                                     episode = episode,
-                                    isActive = activeChannelId == episode.channelId && activePodcastEpisode?.id == episode.id,
+                                    isActive = currentMediaId == episode.id.toString(),
                                     isPlaying = isPlaying,
                                     playbackSpeed = playbackSpeed,
                                     currentPositionMs = currentPositionMs,
@@ -709,7 +711,7 @@ fun AddButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) 
 }
 
 @Composable
-fun PodcastDashboard(channels: List<AudioChannel>, recentEpisodes: List<com.michael.simplemusic.data.PodcastEpisode>, activeView: String, onChannelClick: (Int) -> Unit, onEpisodeClick: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onSwitchView: (String) -> Unit, onCreateChannel: () -> Unit, onDownloadAllNew: () -> Unit, onDeleteChannel: (Int) -> Unit, onUrlUpdate: (Int, String) -> Unit, pendingMarkPlayed: Set<Int>, onSwipeMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onUndoMarkPlayed: (Int) -> Unit) {
+fun PodcastDashboard(channels: List<AudioChannel>, recentEpisodes: List<com.michael.simplemusic.data.PodcastEpisode>, activeView: String, onChannelClick: (Int) -> Unit, onEpisodeClick: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onPlayEpisode: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onSwitchView: (String) -> Unit, onCreateChannel: () -> Unit, onDownloadAllNew: () -> Unit, onDeleteChannel: (Int) -> Unit, onUrlUpdate: (Int, String) -> Unit, pendingMarkPlayed: Set<Int>, onSwipeMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onUndoMarkPlayed: (Int) -> Unit) {
     Column(modifier = Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = if (activeView == "SHOWS") 0 else 1) {
             Tab(selected = activeView == "SHOWS", onClick = { onSwitchView("SHOWS") }, text = { Text("Shows") })
@@ -750,7 +752,7 @@ fun PodcastDashboard(channels: List<AudioChannel>, recentEpisodes: List<com.mich
                         EpisodeListItem(
                             episode = episode,
                             onClick = { onEpisodeClick(episode) },
-                            onPlay = { onEpisodeClick(episode) },
+                            onPlay = { onPlayEpisode(episode) },
                             onDownload = {},
                             onDelete = {},
                             onSwipe = { onSwipeMarkPlayed(episode) },
@@ -929,7 +931,8 @@ fun EpisodeDetailScreen(
                 onSkipBack = onSkipBack,
                 onSkipForward = onSkipForward,
                 onSeek = onSeek,
-                onSpeedChange = onSpeedChange
+                onSpeedChange = onSpeedChange,
+                showTitle = false
             )
             Spacer(Modifier.height(16.dp))
         }
@@ -938,8 +941,6 @@ fun EpisodeDetailScreen(
             if (episode.isDownloaded) {
                 if (!isActive) {
                     Button(onClick = { onPlay(episode) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Play") }
-                } else {
-                    OutlinedButton(onClick = { onDelete(episode) }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Delete, null); Spacer(Modifier.width(8.dp)); Text("Delete") }
                 }
             } else if (episode.isDownloading || episode.isQueued) {
                 Button(onClick = {}, enabled = false, modifier = Modifier.weight(1f)) { 
@@ -980,10 +981,12 @@ fun PodcastListScreen(channels: List<AudioChannel>, onChannelClick: (Int) -> Uni
 }
 
 @Composable
-fun PodcastPlayer(activeEpisode: com.michael.simplemusic.data.PodcastEpisode, isPlaying: Boolean, playbackSpeed: Float, currentPositionMs: Long, durationMs: Long, onPlayPause: () -> Unit, onSkipBack: () -> Unit, onSkipForward: () -> Unit, onSeek: (Long) -> Unit, onSpeedChange: (Float) -> Unit) {
+fun PodcastPlayer(activeEpisode: com.michael.simplemusic.data.PodcastEpisode, isPlaying: Boolean, playbackSpeed: Float, currentPositionMs: Long, durationMs: Long, onPlayPause: () -> Unit, onSkipBack: () -> Unit, onSkipForward: () -> Unit, onSeek: (Long) -> Unit, onSpeedChange: (Float) -> Unit, showTitle: Boolean = true) {
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(activeEpisode.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(16.dp))
+        if (showTitle) {
+            Text(activeEpisode.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(16.dp))
+        }
         Slider(value = if (durationMs > 0) (currentPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f, onValueChange = { onSeek((it * durationMs).toLong()) })
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(formatDuration(currentPositionMs)); Text(formatDuration(durationMs))

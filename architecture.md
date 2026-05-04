@@ -143,7 +143,8 @@ Manages complex states for multiple subscriptions and individual episode progres
 *   **Recent Tab:** A chronological feed of episodes from all subscriptions (last 14 days). Includes a "Download All" button for unplayed episodes within that window.
 *   **Episode List Item:** Shows a circular progress ring (indicating remaining time), show name, title, and metadata (download status, publication date).
     *   **Interaction:** Swipe left/right to mark as played (with a 5-second undo window); tap Play icon for immediate playback; tap title for details.
-*   **Episode Details Page:** Features a playback slider (with skip back 15s / forward 30s), show notes (HTML rendered), and context-aware actions (Download/Stream/Delete, Mark Played/Unplayed toggle).
+*   **Episode Details Page:** Features a playback slider (with skip back 15s / forward 30s), show notes (HTML rendered), and context-aware actions (Download/Stream, Mark Played/Unplayed toggle). Also includes a **Playback Speed** toggle (0.5x to 2.0x).
+    *   **Cleanup Logic:** The explicit "Delete" button is removed in favor of automatic cleanup. Marking an episode as **Unplayed** now automatically deletes the associated offline audio file to ensure a clean state.
 *   **Back Navigation:** Context-aware — navigating back from Episode Detail returns to the Recent feed or Show Detail, depending on the entry point.
 
 ### Global State & UI Components
@@ -154,3 +155,4 @@ A shared state layer ensures seamless switching between modules.
 *   **Mini Player:** A persistent bar at the bottom of the UI showing current metadata, progress, and a play/pause button.
     *   **Navigation:** Tapping the Mini Player navigates to the relevant details page (Deck Details or Episode Details). For Radio, it navigates to the Radio tab.
 *   **Widget:** Provides a glanceable UI on the Android home screen with playback controls (Play/Pause, Rewind, Fast Forward) and current track metadata.
+    *   **Progress Tracking:** Includes a progress bar and text-based duration/position info (e.g., "1:23 / 4:56") that refreshes every second during playback. For live radio, these elements are hidden or shown as "Live".

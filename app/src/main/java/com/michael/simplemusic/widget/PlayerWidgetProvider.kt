@@ -34,10 +34,30 @@ class PlayerWidgetProvider : AppWidgetProvider() {
                 views.setTextViewText(R.id.widget_title, title)
                 views.setTextViewText(R.id.widget_subtitle, subtitle)
                 views.setImageViewResource(R.id.widget_btn_play_pause, if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play)
-                views.setProgressBar(R.id.widget_progress, duration.toInt(), position.toInt(), false)
+                
+                if (duration > 0) {
+                    views.setViewVisibility(R.id.widget_progress, android.view.View.VISIBLE)
+                    views.setViewVisibility(R.id.widget_current_time, android.view.View.VISIBLE)
+                    views.setViewVisibility(R.id.widget_total_time, android.view.View.VISIBLE)
+                    views.setProgressBar(R.id.widget_progress, duration.toInt(), position.toInt(), false)
+                    views.setTextViewText(R.id.widget_current_time, formatTime(position))
+                    views.setTextViewText(R.id.widget_total_time, formatTime(duration))
+                } else {
+                    views.setViewVisibility(R.id.widget_progress, android.view.View.INVISIBLE)
+                    views.setViewVisibility(R.id.widget_current_time, android.view.View.GONE)
+                    views.setViewVisibility(R.id.widget_total_time, android.view.View.GONE)
+                }
+                
                 appWidgetManager.updateAppWidget(id, views)
             }
         }
+    }
+
+    private fun formatTime(ms: Long): String {
+        val totalSeconds = ms / 1000
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return "%d:%02d".format(minutes, seconds)
     }
 
     companion object {

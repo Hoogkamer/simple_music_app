@@ -121,6 +121,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val _playbackSpeed = MutableStateFlow(1.0f)
     val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
 
+    private val _currentMediaId = MutableStateFlow<String?>(null)
+    val currentMediaId: StateFlow<String?> = _currentMediaId.asStateFlow()
+
     init {
         viewModelScope.launch { podcastRepository.clearDownloadingState() }
         allChannels = repository.allChannels
@@ -277,6 +280,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             val title = item.mediaMetadata.title?.toString() ?: ""
             if (title.isNotEmpty()) _currentTrackName.value = title
             _currentTrackIndex.value = controller.currentMediaItemIndex
+            _currentMediaId.value = item.mediaId
         }
     }
 
@@ -317,6 +321,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             val controller = mediaController ?: return
             controller.stop()
             controller.clearMediaItems()
+            _currentMediaId.value = null
 
             when (channel.type) {
                 ChannelType.FOLDER -> {
