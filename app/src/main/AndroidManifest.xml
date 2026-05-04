@@ -34,6 +34,20 @@
             </intent-filter>
         </service>
 
+        <receiver
+            android:name=".widget.PlayerWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.michael.simplemusic.ACTION_PLAY_PAUSE" />
+                <action android:name="com.michael.simplemusic.ACTION_STOP" />
+                <action android:name="com.michael.simplemusic.ACTION_UPDATE_WIDGET" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_info" />
+        </receiver>
+
     </application>
 
 </manifest>

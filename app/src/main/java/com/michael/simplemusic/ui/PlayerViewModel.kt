@@ -43,8 +43,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var mediaController: MediaController? = null
-    private var podcastEpisodesJob: kotlinx.coroutines.Job? = null
-
+    private var playerLoadJob: Job? = null
+    private var podcastEpisodesJob: Job? = null
     private var isRefreshing = false
 
     // --- Exposed state ---
@@ -135,6 +135,24 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 actualConfig.activeMusicChannelId?.let { id -> _activeMusicChannel.value = repository.getChannelById(id) }
                 actualConfig.activeRadioChannelId?.let { id -> _activeRadioChannel.value = repository.getChannelById(id) }
                 actualConfig.activePodcastChannelId?.let { id -> _activePodcastChannel.value = repository.getChannelById(id) }
+
+                if (_activeEpisodeId.value == null && actualConfig.activePodcastEpisodeId != null) {
+                    _activeEpisodeId.value = actualConfig.activePodcastEpisodeId
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            configDao.getConfig().first()?.let { config ->
+                val activeId = when (config.lastCategory) {
+                    "MUSIC" -> config.activeMusicChannelId
+                    "RADIO" -> config.activeRadioChannelId
+                    "PODCASTS" -> config.activePodcastChannelId
+                    else -> null
+                }
+                if (activeId != null) {
+                    selectChannel(activeId, autoPlay = false)
+                }
             }
         }
 
@@ -156,10 +174,26 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
             val title = mediaMetadata.title?.toString()
             val artist = mediaMetadata.artist?.toString()
+            val station = mediaMetadata.station?.toString() ?: mediaMetadata.albumTitle?.toString()
+
             if (artist != null && title != null) {
                 _streamMetadata.value = "$artist - $title"
             } else if (title != null) {
                 _streamMetadata.value = title
+            }
+
+            // Auto-discovery for Radio Station names
+            val activeRadio = _activeRadioChannel.value
+            if (activeRadio != null && !station.isNullOrBlank() && 
+                (activeRadio.name.isBlank() || activeRadio.name.contains("Loading") || activeRadio.name == "New Radio")) {
+                viewModelScope.launch {
+                    val updated = activeRadio.copy(name = station)
+                    repository.updateChannel(updated)
+                    _activeRadioChannel.value = updated
+                    if (_activeChannelId.value == activeRadio.id) {
+                        _currentTrackName.value = station
+                    }
+                }
             }
         }
 
@@ -204,7 +238,19 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                         if (dur > 0) _durationMs.value = dur
                         
                         activeEpisode.value?.let { episode ->
-                            podcastRepository.updatePlaybackPosition(episode, pos, dur)
+                            // Robust check: Only update if the player is actually playing THIS episode
+                            // and has valid duration/position (avoiding 0 resets during load)
+                            val isCorrectItem = it.currentMediaItem?.mediaId == episode.id.toString()
+                            val isReady = it.playbackState == Player.STATE_READY || it.playbackState == Player.STATE_BUFFERING
+                            
+                            if (_activeChannelId.value == episode.channelId && isCorrectItem && isReady) {
+                                // Prevent saving 0 if we know we should be elsewhere (seek in progress)
+                                if (pos == 0L && episode.playbackPositionMs > 1000 && !it.isPlaying) {
+                                    // Ignore 0 during initial load/buffer
+                                } else {
+                                    podcastRepository.updatePlaybackPosition(episode, pos, dur)
+                                }
+                            }
                         }
                     }
                 }
@@ -227,8 +273,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun selectChannel(channelId: Int) {
-        viewModelScope.launch {
+    fun selectChannel(channelId: Int, autoPlay: Boolean = true) {
+        playerLoadJob?.cancel()
+        playerLoadJob = viewModelScope.launch {
             if (!isRefreshing) saveCurrentPlaybackState()
             _activeEpisodeId.value = null // Clear active episode if switching channels
             val channel = repository.getChannelById(channelId) ?: return@launch
@@ -249,11 +296,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     updateConfig { it.copy(activePodcastChannelId = channelId, lastCategory = "PODCASTS") }
                 }
             }
-            loadChannelIntoPlayer(channel)
+            loadChannelIntoPlayer(channel, autoPlay)
         }
     }
 
-    private suspend fun loadChannelIntoPlayer(channel: AudioChannel) {
+    private suspend fun loadChannelIntoPlayer(channel: AudioChannel, autoPlay: Boolean) {
         isRefreshing = true
         _currentTrackName.value = channel.currentTrackTitle ?: "Loading..."
         _currentPositionMs.value = channel.currentPositionMs
@@ -283,7 +330,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                             controller.repeatMode = if (channel.repeatEnabled) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
                             controller.prepare()
                             delay(1000)
-                            controller.play()
+                            if (autoPlay) controller.play()
                         }
                     }
                 }
@@ -294,7 +341,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                             val item = MediaItem.Builder().setUri(channel.streamUrl).setMediaMetadata(MediaMetadata.Builder().setTitle(channel.name).build()).build()
                             controller.setMediaItem(item)
                             controller.prepare()
-                            controller.play()
+                            if (autoPlay) controller.play()
                         } catch (e: Exception) {
                             _streamMetadata.value = "Error: ${e.message}"
                         }
@@ -318,14 +365,22 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         val channelId = _activeChannelId.value ?: return
         val controller = mediaController ?: return
         val index = controller.currentMediaItemIndex
-        if (index < 0) return
+        val item = controller.currentMediaItem
+        if (item == null) return
 
         // Read all MediaController properties on the main thread (required by Media3)
-        val item = controller.currentMediaItem
         val currentPosition = controller.currentPosition.coerceAtLeast(0L)
         val duration = controller.duration
         val mediaId = item?.mediaId
         val title = item?.mediaMetadata?.title?.toString()
+
+        // Skip saving 0 if we are in a transition state (prevent resets)
+        if (currentPosition == 0L && !isRefreshing) {
+            val activeEp = activeEpisode.value
+            if (activeEp != null && activeEp.id.toString() == mediaId && activeEp.playbackPositionMs > 1000) {
+                return // Likely a race condition during load
+            }
+        }
 
         withContext(Dispatchers.IO) {
             val channel = repository.getChannelById(channelId) ?: return@withContext
@@ -352,7 +407,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun createChannel(name: String, type: ChannelType = ChannelType.FOLDER, streamUrl: String? = null) {
         viewModelScope.launch {
-            val initialName = if (type == ChannelType.PODCAST) "Loading..." else name
+            val initialName = if (type == ChannelType.PODCAST || (type == ChannelType.RADIO && name.isBlank())) "Loading..." else name
             val id = repository.insertChannel(AudioChannel(name = initialName, type = type, streamUrl = streamUrl))
             if (type == ChannelType.PODCAST && streamUrl != null) {
                 val title = podcastRepository.refreshFeed(id.toInt(), streamUrl)
@@ -385,7 +440,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             val updated = channel.copy(folderUri = uri.toString(), folderDisplayName = name, currentTrackIndex = 0, currentTrackUri = null, currentTrackTitle = null, currentPositionMs = 0L)
             repository.updateChannel(updated)
             _activeMusicChannel.value = updated
-            loadChannelIntoPlayer(updated)
+            loadChannelIntoPlayer(updated, autoPlay = true)
         }
     }
 
@@ -429,6 +484,20 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun bulkAddRadioStations(urlsText: String) {
+        viewModelScope.launch {
+            val existingUrls = allChannels.value.filter { it.type == ChannelType.RADIO }.mapNotNull { it.streamUrl }.toSet()
+            val lines = urlsText.split(Regex("[\\n\\r,;\\s]+"))
+            val newUrls = lines.map { it.trim() }
+                .filter { it.isNotEmpty() && it.startsWith("http") && it !in existingUrls }
+                .distinct()
+            
+            newUrls.forEach { url ->
+                repository.insertChannel(AudioChannel(name = "Loading...", type = ChannelType.RADIO, streamUrl = url))
+            }
+        }
+    }
+
     fun setPodcastView(view: String) {
         _podcastView.value = view
     }
@@ -467,21 +536,57 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setActiveEpisode(episode: PodcastEpisode?) {
         _activeEpisodeId.value = episode?.id
+        updateConfig { it.copy(activePodcastEpisodeId = episode?.id) }
     }
 
     fun playPodcastEpisode(episode: PodcastEpisode) {
-        mediaController?.let { controller ->
-            setActiveEpisode(episode)
-            val uri = episode.localPath ?: episode.streamUrl
-            val item = MediaItem.Builder()
-                .setMediaId(episode.id.toString())
-                .setUri(uri)
-                .setMediaMetadata(MediaMetadata.Builder().setTitle(episode.title).build())
-                .build()
-            controller.setMediaItem(item)
-            controller.seekTo(episode.playbackPositionMs)
-            controller.prepare()
-            controller.play()
+        playerLoadJob?.cancel()
+        playerLoadJob = viewModelScope.launch {
+            val channel = repository.getChannelById(episode.channelId) ?: return@launch
+
+            isRefreshing = true
+            try {
+                // 1. Update State to point to this Podcast Channel
+                _activeChannelId.value = episode.channelId
+                setActiveEpisode(episode)
+                
+                updateConfig { it.copy(
+                    activePodcastChannelId = episode.channelId,
+                    lastCategory = ChannelType.PODCAST.name
+                ) }
+
+                // 2. Update UI tracking
+                _currentTrackName.value = episode.title
+                _currentPositionMs.value = episode.playbackPositionMs
+                _durationMs.value = episode.durationMs
+
+                // 3. Load into ExoPlayer
+                mediaController?.let { controller ->
+                    controller.stop()
+                    val uri = episode.localPath ?: episode.streamUrl
+                    val item = MediaItem.Builder()
+                        .setMediaId(episode.id.toString())
+                        .setUri(uri)
+                        .setMediaMetadata(MediaMetadata.Builder().setTitle(episode.title).build())
+                        .build()
+                    controller.setMediaItem(item)
+                    controller.seekTo(episode.playbackPositionMs)
+                    controller.prepare()
+                    controller.play()
+                }
+
+                // 4. Update the Podcast Channel in DB
+                repository.updateChannel(channel.copy(
+                    currentTrackUri = episode.id.toString(),
+                    currentTrackTitle = episode.title,
+                    currentPositionMs = episode.playbackPositionMs
+                ))
+            } finally {
+                delay(1000)
+                isRefreshing = false
+                updateCurrentTrackInfo()
+                saveCurrentPlaybackState()
+            }
         }
     }
 

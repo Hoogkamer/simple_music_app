@@ -1,63 +1,49 @@
-# Simple Music Player
+# Total Audio Hub
 
-A folder-based Android music player designed for users who want to switch between different "listening states" (e.g., Train, Walking, Home). Each state remembers its own selected folder, current track, and playback position.
+A comprehensive Android audio center designed for independent management of Music, Radio, and Podcasts. Built for users who value offline reliability, context-specific state management, and high-visibility controls.
 
 ## Features
 
-- **Up to 5 Listening States**: Create custom states with unique names.
-- **Context Awareness**: Seamlessly switch between states and resume exactly where you left off.
-- **Recursive Folder Scanning**: Plays all MP3 files within a selected folder and its subdirectories.
-- **Media3 (ExoPlayer) Integration**: Robust background playback with notification and Bluetooth controls.
-- **Material 3 Design**: Modern, clean UI with dynamic color support (Android 12+).
+- **Music Decks**: Folder-based playback with independent position memory for every "Deck" (context).
+- **Radio Stations**: Global station search and live streaming with real-time metadata.
+- **Podcasts**: RSS subscription, background downloading, and smart queue management.
+- **Context Resumption**: Seamlessly switch between a 2-hour DJ mix, a live radio stream, and a podcast episode without losing your place.
+- **Media3 (ExoPlayer) Integration**: Robust background playback with system-level notification and Bluetooth controls.
+- **Material 3 Design**: Modern UI with dynamic color support.
+
+## Documentation
+
+- **[User Manual](user_manual.md)**: A complete guide on how to use all features of the app.
+- **[Technical Architecture](architecture.md)**: Deep dive into the data model, module structure, and media engine.
 
 ## Tech Stack
 
 - **Kotlin**: Primary language.
 - **Jetpack Compose**: Modern declarative UI.
-- **Media3**: For high-performance audio playback.
-- **Room**: For persistence of listening states.
+- **Media3 (ExoPlayer)**: High-performance audio playback.
+- **Room**: Persistent storage for states and podcast data.
+- **WorkManager**: Reliable background downloading for podcasts.
 
-## How to Install on Your Phone
+## Installation
 
 ### Prerequisites
-
-1.  **Enable Developer Options** on your Android phone:
-    - Go to **Settings** > **About phone**.
-    - Tap **Build number** 7 times until you see "You are now a developer!".
-2.  **Enable USB Debugging**:
-    - Go to **Settings** > **System** > **Developer options**.
-    - Toggle **USB debugging** to ON.
+1.  **Enable Developer Options** on your Android phone.
+2.  **Enable USB Debugging**.
 3.  **Connect your phone** to your computer via USB.
 
-### Method 1: Using Android Studio (Recommended)
-
+### Method 1: Android Studio (Recommended)
 1.  Open this project in **Android Studio**.
-2.  Select your phone from the device dropdown in the top toolbar.
-3.  Click the **Run** button (green play icon) or press `Shift + F10`.
+2.  Select your phone from the device dropdown.
+3.  Click the **Run** button or press `Shift + F10`.
 
-### Method 2: Using the Command Line (ADB)
-
-If you have the Android SDK installed, you can build and install the APK manually:
-
-1.  Open a terminal in the project root.
-2.  Build the debug APK:
-    ```bash
-    ./gradlew assembleDebug
-    ```
-3.  Install the APK to your connected phone:
-    ```bash
-    adb install app/build/outputs/apk/debug/app-debug.apk
-    ```
-
-## How to Use
-
-1.  **Open the App**: You'll see an option to create a Listening State.
-2.  **Create a State**: Tap `Create State` and give it a name like "Train Ride".
-3.  **Choose a Folder**: Tap `Select Folder` and navigate to a folder on your phone containing MP3 files. Grant the app permission to access that folder.
-4.  **Play Music**: The app will scan for MP3s and start playing. You can shuffle, repeat, and skip tracks.
-5.  **Switch Contexts**: Use the dropdown at the top to switch to another state (e.g., "Gym"). When you switch back to "Train Ride", it will resume the same track at the exact same second you left it.
+### Method 2: Command Line (ADB)
+```bash
+./gradlew assembleDebug
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
 
 ## Permissions
+- **Notifications**: For playback controls in the shade and lock screen.
+- **Storage Access (SAF)**: To read your music folders securely.
+- **Internet**: To fetch radio streams and podcast RSS feeds.
 
-- **Notification Permission**: Used to show playback controls on your lock screen and notification shade.
-- **Storage Access (SAF)**: Used to read your music folders without requiring full file system access.

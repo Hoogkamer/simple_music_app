@@ -9,6 +9,7 @@ data class AppConfig(
     val activeMusicChannelId: Int? = null,
     val activeRadioChannelId: Int? = null,
     val activePodcastChannelId: Int? = null,
+    val activePodcastEpisodeId: Int? = null,
     val lastCategory: String = "CHANNELS",
     val hidePlayedEpisodes: Boolean = false
 )

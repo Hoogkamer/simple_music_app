@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -77,6 +78,7 @@ fun PlayerScreen(
     val radioSearchResults by viewModel.radioSearchResults.collectAsStateWithLifecycle()
 
     var showAddStation by remember { mutableStateOf(false) }
+    var showBulkImport by remember { mutableStateOf(false) }
     var showAddPodcast by remember { mutableStateOf(false) }
     var showAddMusic by remember { mutableStateOf(false) }
     var showRadioSearch by remember { mutableStateOf(false) }
@@ -92,11 +94,26 @@ fun PlayerScreen(
         )
     }
 
-    var podcastNav by remember { mutableStateOf(PodcastNavigation.DASHBOARD) }
+    var podcastNav by remember { 
+        mutableStateOf(
+            if (appConfig.lastCategory == "PODCASTS" && appConfig.activePodcastEpisodeId != null) 
+                PodcastNavigation.EPISODE_DETAIL 
+            else PodcastNavigation.DASHBOARD
+        ) 
+    }
     var cameFromRecent by remember { mutableStateOf(false) }
-    var selectedPodcastId by remember { mutableIntStateOf(-1) }
+    var selectedPodcastId by remember { mutableIntStateOf(appConfig.activePodcastChannelId ?: -1) }
 
-    var isPlayerVisible by remember { mutableStateOf(false) }
+    var isPlayerVisible by remember { 
+        mutableStateOf(
+            when (appConfig.lastCategory) {
+                "MUSIC" -> appConfig.activeMusicChannelId != null
+                "RADIO" -> appConfig.activeRadioChannelId != null
+                "PODCASTS" -> appConfig.activePodcastChannelId != null
+                else -> false
+            }
+        ) 
+    }
 
     val folderPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -106,6 +123,20 @@ fun PlayerScreen(
             val docFile = DocumentFile.fromTreeUri(context, folderUri)
             viewModel.setFolder(folderUri, docFile?.name ?: "Unknown Folder")
             isPlayerVisible = true
+        }
+    }
+
+    val importRadioLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { fileUri ->
+            val context = viewModel.getApplication<android.app.Application>()
+            try {
+                val content = context.contentResolver.openInputStream(fileUri)?.bufferedReader()?.use { it.readText() }
+                content?.let { viewModel.bulkAddRadioStations(it) }
+            } catch (e: Exception) {
+                // Handle error if needed
+            }
         }
     }
 
@@ -214,10 +245,16 @@ fun PlayerScreen(
                             Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.MusicNote, null, tint = MaterialTheme.colorScheme.primary)
                                 Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                                    Text(activePodcastEpisode?.title ?: currentTrackName.ifEmpty { streamMetadata ?: "Audio Hub" }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(currentTrackName.ifEmpty { streamMetadata ?: "Total Audio Hub" }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     if (durationMs > 0) LinearProgressIndicator(progress = { (currentPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp).height(2.dp))
                                 }
-                                IconButton(onClick = { viewModel.playPause() }) { Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, null) }
+                                IconButton(onClick = { 
+                                    if (currentDestination == NavigationDestination.PODCASTS && activePodcastEpisode != null && activeChannelId != activePodcastEpisode?.channelId) {
+                                        viewModel.playPodcastEpisode(activePodcastEpisode!!)
+                                    } else {
+                                        viewModel.playPause()
+                                    }
+                                }) { Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, null) }
                             }
                         }
                     }
@@ -247,10 +284,17 @@ fun PlayerScreen(
                         onRenameChannel = { id, name -> viewModel.renameChannel(id, name) },
                         onCreateChannel = { showAddMusic = true },
                         onFolderPick = { folderPickerLauncher.launch(null) },
-                        onPlayPause = { viewModel.playPause() },
-                        onNext = { viewModel.next() },
-                        onPrevious = { viewModel.previous() },
-                        onSeek = { viewModel.seekTo(it) },
+                        onPlayPause = { 
+                            val channel = activeMusicChannel
+                            if (channel != null && activeChannelId != channel.id) {
+                                viewModel.selectChannel(channel.id, autoPlay = true)
+                            } else {
+                                viewModel.playPause()
+                            }
+                        },
+                        onNext = { if (activeChannelId == activeMusicChannel?.id) viewModel.next() },
+                        onPrevious = { if (activeChannelId == activeMusicChannel?.id) viewModel.previous() },
+                        onSeek = { if (activeChannelId == activeMusicChannel?.id) viewModel.seekTo(it) },
                         onToggleShuffle = { viewModel.toggleShuffle() },
                         onToggleRepeat = { viewModel.toggleRepeat() }
                     )
@@ -265,20 +309,27 @@ fun PlayerScreen(
                         onDeleteChannel = { viewModel.deleteChannel(it) },
                         onRenameChannel = { id, name -> viewModel.renameChannel(id, name) },
                         onUrlUpdate = { id, url -> viewModel.setRadioUrl(id, url) },
-                        onCreateChannel = { showAddStation = true }
+                        onCreateChannel = { showAddStation = true },
+                        onBulkImport = { showBulkImport = true }
                     )
                 }
                 NavigationDestination.PODCASTS -> {
                     if (isPlayerVisible && activePodcastEpisode != null) {
                         PodcastPlayer(
                             activeEpisode = activePodcastEpisode!!,
-                            isPlaying = isPlaying,
-                            currentPositionMs = currentPositionMs,
-                            durationMs = durationMs,
-                            onPlayPause = { viewModel.playPause() },
-                            onSkipBack = { viewModel.skipBack() },
-                            onSkipForward = { viewModel.skipForward() },
-                            onSeek = { viewModel.seekTo(it) }
+                            isPlaying = isPlaying && activeChannelId == activePodcastEpisode?.channelId,
+                            currentPositionMs = if (activeChannelId == activePodcastEpisode?.channelId && durationMs > 0) currentPositionMs else activePodcastEpisode!!.playbackPositionMs,
+                            durationMs = if (activeChannelId == activePodcastEpisode?.channelId && durationMs > 0) durationMs else activePodcastEpisode!!.durationMs,
+                            onPlayPause = {
+                                if (activeChannelId == activePodcastEpisode?.channelId) {
+                                    viewModel.playPause()
+                                } else {
+                                    activePodcastEpisode?.let { viewModel.playPodcastEpisode(it) }
+                                }
+                            },
+                            onSkipBack = { if (activeChannelId == activePodcastEpisode?.channelId) viewModel.skipBack() },
+                            onSkipForward = { if (activeChannelId == activePodcastEpisode?.channelId) viewModel.skipForward() },
+                            onSeek = { if (activeChannelId == activePodcastEpisode?.channelId) viewModel.seekTo(it) }
                         )
                     } else {
                         when (podcastNav) {
@@ -316,7 +367,15 @@ fun PlayerScreen(
                             activePodcastEpisode?.let { episode ->
                                 EpisodeDetailScreen(
                                     episode = episode,
+                                    isActive = activeChannelId == episode.channelId && activePodcastEpisode?.id == episode.id,
+                                    isPlaying = isPlaying,
+                                    currentPositionMs = currentPositionMs,
+                                    durationMs = durationMs,
                                     onPlay = { viewModel.playPodcastEpisode(it) },
+                                    onPause = { viewModel.playPause() },
+                                    onSeek = { viewModel.seekTo(it) },
+                                    onSkipBack = { viewModel.skipBack() },
+                                    onSkipForward = { viewModel.skipForward() },
                                     onDownload = { viewModel.downloadEpisode(it) },
                                     onDelete = { viewModel.deleteEpisodeFile(it) },
                                     onMarkPlayed = { viewModel.markEpisodeAsPlayed(it) },
@@ -334,6 +393,12 @@ fun PlayerScreen(
         if (showAddPodcast) AddPodcastScreen(onSave = { url -> viewModel.createChannel("", ChannelType.PODCAST, url); showAddPodcast = false }, onDismiss = { showAddPodcast = false })
         if (showAddMusic) AddMusicDeckScreen(onSave = { name -> viewModel.createChannel(name, ChannelType.FOLDER); showAddMusic = false }, onDismiss = { showAddMusic = false })
         if (showRadioSearch) RadioSearchDialog(results = radioSearchResults, onSearch = { viewModel.searchRadioStations(it) }, onSelect = { result -> viewModel.createChannel(result.name, ChannelType.RADIO, result.url); showRadioSearch = false }, onDismiss = { showRadioSearch = false })
+        
+        if (showBulkImport) BulkImportDialog(
+            onSave = { viewModel.bulkAddRadioStations(it); showBulkImport = false },
+            onFilePick = { importRadioLauncher.launch(arrayOf("text/*", "application/*")); showBulkImport = false },
+            onDismiss = { showBulkImport = false }
+        )
         }
     }
 }
@@ -358,25 +423,42 @@ fun MusicDashboard(channels: List<AudioChannel>, activeChannelId: Int?, isPlayin
 }
 
 @Composable
-fun RadioDashboard(channels: List<AudioChannel>, activeChannelId: Int?, isPlaying: Boolean, streamMetadata: String?, onChannelClick: (Int) -> Unit, onDeleteChannel: (Int) -> Unit, onRenameChannel: (Int, String) -> Unit, onUrlUpdate: (Int, String) -> Unit, onCreateChannel: () -> Unit) {
-    if (channels.isEmpty()) {
-        EmptyState("No radio stations yet", Icons.Default.Radio, onCreateChannel)
-    } else {
-        LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            items(channels) { channel ->
-                val isActive = channel.id == activeChannelId
-                RadioCard(
-                    channel = channel,
-                    isActive = isActive,
-                    isPlaying = isActive && isPlaying,
-                    status = if (isActive && isPlaying) streamMetadata ?: "Streaming..." else "Live Station",
-                    onClick = { onChannelClick(channel.id) },
-                    onDelete = { onDeleteChannel(channel.id) },
-                    onRename = { newName -> onRenameChannel(channel.id, newName) },
-                    onUrlUpdate = { newUrl -> onUrlUpdate(channel.id, newUrl) }
-                )
+fun RadioDashboard(channels: List<AudioChannel>, activeChannelId: Int?, isPlaying: Boolean, streamMetadata: String?, onChannelClick: (Int) -> Unit, onDeleteChannel: (Int) -> Unit, onRenameChannel: (Int, String) -> Unit, onUrlUpdate: (Int, String) -> Unit, onCreateChannel: () -> Unit, onBulkImport: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        if (channels.isEmpty()) {
+            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Radio, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outline)
+                    Text("No radio stations yet", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 16.dp))
+                }
             }
-            item { AddButton("Add New Station", onCreateChannel) }
+        } else {
+            LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                items(channels) { channel ->
+                    val isActive = channel.id == activeChannelId
+                    RadioCard(
+                        channel = channel,
+                        isActive = isActive,
+                        isPlaying = isActive && isPlaying,
+                        status = if (isActive && isPlaying) streamMetadata ?: "Streaming..." else "Live Station",
+                        onClick = { onChannelClick(channel.id) },
+                        onDelete = { onDeleteChannel(channel.id) },
+                        onRename = { newName -> onRenameChannel(channel.id, newName) },
+                        onUrlUpdate = { newUrl -> onUrlUpdate(channel.id, newUrl) }
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AddButton("Add New", onCreateChannel, modifier = Modifier.weight(1f))
+            OutlinedButton(onClick = onBulkImport, modifier = Modifier.weight(1f).height(80.dp)) { 
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.CloudUpload, null)
+                    Text("Bulk Import", style = MaterialTheme.typography.labelSmall)
+                }
+            }
         }
     }
 }
@@ -583,8 +665,37 @@ fun EmptyState(text: String, icon: androidx.compose.ui.graphics.vector.ImageVect
 }
 
 @Composable
-fun AddButton(text: String, onClick: () -> Unit) {
-    OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth().height(80.dp)) {
+fun BulkImportDialog(onSave: (String) -> Unit, onFilePick: () -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Bulk Import Radio Stations") },
+        text = {
+            Column {
+                Text("Paste stream URLs (one per line or comma-separated) or load a text file.", style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    placeholder = { Text("http://stream.url/1\nhttp://stream.url/2") },
+                    modifier = Modifier.fillMaxWidth().height(150.dp)
+                )
+                Spacer(Modifier.height(16.dp))
+                OutlinedButton(onClick = onFilePick, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.FileOpen, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Load from File (Google Drive/Local)")
+                }
+            }
+        },
+        confirmButton = { Button(onClick = { if (text.isNotBlank()) onSave(text) }) { Text("Import Pasted") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+fun AddButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    OutlinedButton(onClick = onClick, modifier = modifier.fillMaxWidth().height(80.dp)) {
         Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text(text)
     }
 }
@@ -647,21 +758,39 @@ fun PodcastDashboard(channels: List<AudioChannel>, recentEpisodes: List<com.mich
 
 @Composable
 fun PodcastShowDetail(episodes: List<com.michael.simplemusic.data.PodcastEpisode>, onEpisodeClick: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onPlayEpisode: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onDownload: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onDelete: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, pendingMarkPlayed: Set<Int>, onUndoMarkPlayed: (Int) -> Unit) {
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
-        items(episodes, key = { it.id }) { episode ->
-            if (episode.id in pendingMarkPlayed) {
-                UndoItem(episode.title, onUndo = { onUndoMarkPlayed(episode.id) })
-            } else {
-                EpisodeListItem(
-                    episode = episode,
-                    onClick = { onEpisodeClick(episode) },
-                    onPlay = { onPlayEpisode(episode) },
-                    onDownload = { onDownload(episode) },
-                    onDelete = { onDelete(episode) },
-                    onSwipe = { onMarkPlayed(episode) },
-                    isPending = false,
-                    onUndo = {}
-                )
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    
+    val filteredEpisodes = remember(searchQuery, episodes) {
+        if (searchQuery.isBlank()) episodes
+        else episodes.filter { it.title.contains(searchQuery, ignoreCase = true) || it.description?.contains(searchQuery, ignoreCase = true) == true }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            label = { Text("Search Episodes") },
+            leadingIcon = { Icon(Icons.Default.Search, null) },
+            singleLine = true
+        )
+        
+        LazyColumn(modifier = Modifier.weight(1f)) {
+            items(filteredEpisodes, key = { it.id }) { episode ->
+                if (episode.id in pendingMarkPlayed) {
+                    UndoItem(episode.title, onUndo = { onUndoMarkPlayed(episode.id) })
+                } else {
+                    EpisodeListItem(
+                        episode = episode,
+                        onClick = { onEpisodeClick(episode) },
+                        onPlay = { onPlayEpisode(episode) },
+                        onDownload = { onDownload(episode) },
+                        onDelete = { onDelete(episode) },
+                        onSwipe = { onMarkPlayed(episode) },
+                        isPending = false,
+                        onUndo = {}
+                    )
+                }
             }
         }
     }
@@ -757,16 +886,49 @@ fun EpisodeListItem(episode: com.michael.simplemusic.data.PodcastEpisode, onClic
 }
 
 @Composable
-fun EpisodeDetailScreen(episode: com.michael.simplemusic.data.PodcastEpisode, onPlay: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onDownload: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onDelete: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkUnplayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit) {
+fun EpisodeDetailScreen(
+    episode: com.michael.simplemusic.data.PodcastEpisode,
+    isActive: Boolean,
+    isPlaying: Boolean,
+    currentPositionMs: Long,
+    durationMs: Long,
+    onPlay: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
+    onPause: () -> Unit,
+    onSeek: (Long) -> Unit,
+    onSkipBack: () -> Unit,
+    onSkipForward: () -> Unit,
+    onDownload: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
+    onDelete: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
+    onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
+    onMarkUnplayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit
+) {
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text(episode.title, style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(8.dp))
         Text(formatDateToDaysAgo(episode.pubDate), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
         Spacer(Modifier.height(16.dp))
+
+        if (isActive) {
+            PodcastPlayer(
+                activeEpisode = episode,
+                isPlaying = isPlaying,
+                currentPositionMs = currentPositionMs,
+                durationMs = if (durationMs > 0) durationMs else episode.durationMs,
+                onPlayPause = { if (isPlaying) onPause() else onPlay(episode) },
+                onSkipBack = onSkipBack,
+                onSkipForward = onSkipForward,
+                onSeek = onSeek
+            )
+            Spacer(Modifier.height(16.dp))
+        }
         
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (episode.isDownloaded) {
-                Button(onClick = { onPlay(episode) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Play") }
+                if (!isActive) {
+                    Button(onClick = { onPlay(episode) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Play") }
+                } else {
+                    OutlinedButton(onClick = { onDelete(episode) }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Delete, null); Spacer(Modifier.width(8.dp)); Text("Delete") }
+                }
             } else if (episode.isDownloading || episode.isQueued) {
                 Button(onClick = {}, enabled = false, modifier = Modifier.weight(1f)) { 
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
@@ -774,8 +936,12 @@ fun EpisodeDetailScreen(episode: com.michael.simplemusic.data.PodcastEpisode, on
                     Text(if (episode.isQueued) "Queued" else "Downloading ${episode.downloadProgress}%")
                 }
             } else {
-                Button(onClick = { onDownload(episode) }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text("Download") }
-                OutlinedButton(onClick = { onPlay(episode) }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Stream") }
+                if (!isActive) {
+                    Button(onClick = { onDownload(episode) }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text("Download") }
+                    OutlinedButton(onClick = { onPlay(episode) }, modifier = Modifier.weight(1f)) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Stream") }
+                } else {
+                    Button(onClick = { onDownload(episode) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text("Download") }
+                }
             }
         }
         
