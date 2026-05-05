@@ -70,3 +70,20 @@ Subscribe to your favorite shows and listen offline.
 ## 5. Global Controls
 - **Mini-Player:** At the bottom of every screen, a mini-player shows what's currently playing. Tap it to expand or use the Play/Pause button.
 - **Bottom Navigation:** Quickly switch between Music, Radio, and Podcasts using the icons at the bottom.
+- **Homescreen Widget:** Long-press your phone's homescreen to add the Total Audio Hub widget for quick control without opening the app.
+
+---
+
+## 6. Home Hub Mode (Launcher)
+Total Audio Hub can act as your device's primary interface, turning a tablet or old phone into a dedicated music station.
+
+### Setting as Default Launcher
+1.  Open your device's **Settings**.
+2.  Navigate to **Apps** -> **Default Apps**.
+3.  Tap **Home app**.
+4.  Select **Total Audio Hub**.
+
+### Using Hub Mode
+- **Stay Focused:** Pressing the physical or virtual Home button will now always bring you back to your audio controls.
+- **System Access:** A dedicated **Clock** button is available in the top bar to quickly jump to your system alarms and time settings.
+- **Edge-to-Edge:** The app automatically uses every pixel of your screen for a clean, immersive look.

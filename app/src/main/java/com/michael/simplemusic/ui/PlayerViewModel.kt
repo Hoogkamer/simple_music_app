@@ -32,6 +32,39 @@ data class RadioStationResult(
     val country: String?
 )
 
+data class MusicState(
+    val activeChannel: AudioChannel? = null,
+    val audioFiles: List<AudioFile> = emptyList(),
+    val isLoading: Boolean = false,
+    val currentTrackName: String = "",
+    val currentTrackArtist: String? = null,
+    val currentTrackAlbum: String? = null,
+    val currentTrackIndex: Int = 0,
+    val positionMs: Long = 0,
+    val durationMs: Long = 0,
+    val shuffleEnabled: Boolean = false,
+    val repeatEnabled: Boolean = true
+)
+
+data class RadioState(
+    val activeChannel: AudioChannel? = null,
+    val streamMetadata: String? = null,
+    val searchResults: List<RadioStationResult> = emptyList()
+)
+
+data class PodcastState(
+    val activeChannel: AudioChannel? = null,
+    val activeEpisode: PodcastEpisode? = null,
+    val episodes: List<PodcastEpisode> = emptyList(),
+    val recentEpisodes: List<PodcastEpisode> = emptyList(),
+    val currentView: String = "RECENT",
+    val currentTrackName: String = "",
+    val currentTrackArtist: String? = null,
+    val positionMs: Long = 0,
+    val durationMs: Long = 0,
+    val isPlayingActiveEpisode: Boolean = false
+)
+
 class PlayerViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as SimpleMusicApp
@@ -47,82 +80,27 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private var podcastEpisodesJob: Job? = null
     private var isRefreshing = false
 
-    // --- Exposed state ---
-    val allChannels: StateFlow<List<AudioChannel>>
-    
+    // --- Unified Category States ---
+    private val _musicState = MutableStateFlow(MusicState())
+    val musicState: StateFlow<MusicState> = _musicState.asStateFlow()
+
+    private val _radioState = MutableStateFlow(RadioState())
+    val radioState: StateFlow<RadioState> = _radioState.asStateFlow()
+
+    private val _podcastState = MutableStateFlow(PodcastState())
+    val podcastState: StateFlow<PodcastState> = _podcastState.asStateFlow()
+
     private val _appConfig = MutableStateFlow(AppConfig())
     val appConfig: StateFlow<AppConfig> = _appConfig.asStateFlow()
-
-    private val _activeMusicChannel = MutableStateFlow<AudioChannel?>(null)
-    val activeMusicChannel: StateFlow<AudioChannel?> = _activeMusicChannel.asStateFlow()
-
-    private val _activeRadioChannel = MutableStateFlow<AudioChannel?>(null)
-    val activeRadioChannel: StateFlow<AudioChannel?> = _activeRadioChannel.asStateFlow()
-
-    private val _radioSearchResults = MutableStateFlow<List<RadioStationResult>>(emptyList())
-    val radioSearchResults: StateFlow<List<RadioStationResult>> = _radioSearchResults.asStateFlow()
-
-    private val _activePodcastChannel = MutableStateFlow<AudioChannel?>(null)
-    val activePodcastChannel: StateFlow<AudioChannel?> = _activePodcastChannel.asStateFlow()
-
-    private val _podcastView = MutableStateFlow("RECENT")
-    val podcastView: StateFlow<String> = _podcastView.asStateFlow()
-
-    private val _activeChannelId = MutableStateFlow<Int?>(null)
-    val activeChannelId: StateFlow<Int?> = _activeChannelId.asStateFlow()
-
-    private val _audioFiles = MutableStateFlow<List<AudioFile>>(emptyList())
-    val audioFiles: StateFlow<List<AudioFile>> = _audioFiles.asStateFlow()
-
-    private val _podcastEpisodes = MutableStateFlow<List<PodcastEpisode>>(emptyList())
-    val podcastEpisodes: StateFlow<List<PodcastEpisode>> = _podcastEpisodes.asStateFlow()
-
-    private val _pendingMarkPlayed = MutableStateFlow<Set<Int>>(emptySet())
-    val pendingMarkPlayed: StateFlow<Set<Int>> = _pendingMarkPlayed.asStateFlow()
-
-    private val _activeEpisodeId = MutableStateFlow<Int?>(null)
-    val activeEpisodeId: StateFlow<Int?> = _activeEpisodeId.asStateFlow()
-
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val activeEpisode: StateFlow<PodcastEpisode?> = _activeEpisodeId
-        .flatMapLatest { id ->
-            if (id == null) kotlinx.coroutines.flow.flowOf(null)
-            else podcastRepository.getEpisodeFlowById(id)
-        }
-        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), null)
-
-    val recentEpisodes = podcastRepository.getRecentEpisodes()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
-    private val _currentTrackName = MutableStateFlow("")
-    val currentTrackName: StateFlow<String> = _currentTrackName.asStateFlow()
+    private val _activeChannelId = MutableStateFlow<Int?>(null)
+    val activeChannelId: StateFlow<Int?> = _activeChannelId.asStateFlow()
 
-    private val _streamMetadata = MutableStateFlow<String?>(null)
-    val streamMetadata: StateFlow<String?> = _streamMetadata.asStateFlow()
-
-    private val _currentTrackArtist = MutableStateFlow<String?>(null)
-    val currentTrackArtist: StateFlow<String?> = _currentTrackArtist.asStateFlow()
-
-    private val _currentTrackAlbum = MutableStateFlow<String?>(null)
-    val currentTrackAlbum: StateFlow<String?> = _currentTrackAlbum.asStateFlow()
-
-    private val _currentTrackIndex = MutableStateFlow(0)
-    val currentTrackIndex: StateFlow<Int> = _currentTrackIndex.asStateFlow()
-
-    private val _currentPositionMs = MutableStateFlow(0L)
-    val currentPositionMs: StateFlow<Long> = _currentPositionMs.asStateFlow()
-
-    private val _durationMs = MutableStateFlow(0L)
-    val durationMs: StateFlow<Long> = _durationMs.asStateFlow()
-
-    private val _shuffleEnabled = MutableStateFlow(false)
-    val shuffleEnabled: StateFlow<Boolean> = _shuffleEnabled.asStateFlow()
-
-    private val _repeatEnabled = MutableStateFlow(true)
-    val repeatEnabled: StateFlow<Boolean> = _repeatEnabled.asStateFlow()
+    private val _pendingMarkPlayed = MutableStateFlow<Set<Int>>(emptySet())
+    val pendingMarkPlayed: StateFlow<Set<Int>> = _pendingMarkPlayed.asStateFlow()
 
     private val _playbackSpeed = MutableStateFlow(1.0f)
     val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
@@ -130,10 +108,17 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val _currentMediaId = MutableStateFlow<String?>(null)
     val currentMediaId: StateFlow<String?> = _currentMediaId.asStateFlow()
 
+    val allChannels: StateFlow<List<AudioChannel>>
+
     init {
         viewModelScope.launch { podcastRepository.clearDownloadingState() }
         allChannels = repository.allChannels
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+        // Sync recent episodes into podcastState
+        podcastRepository.getRecentEpisodes().onEach { episodes ->
+            _podcastState.update { it.copy(recentEpisodes = episodes) }
+        }.launchIn(viewModelScope)
 
         viewModelScope.launch {
             val channels = allChannels.first { it.isNotEmpty() }
@@ -144,15 +129,19 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             configDao.getConfig().collect { config ->
                 val actualConfig = config ?: AppConfig()
                 _appConfig.value = actualConfig
-                actualConfig.activeMusicChannelId?.let { id -> _activeMusicChannel.value = repository.getChannelById(id) }
-                actualConfig.activeRadioChannelId?.let { id -> _activeRadioChannel.value = repository.getChannelById(id) }
-                actualConfig.activePodcastChannelId?.let { id -> _activePodcastChannel.value = repository.getChannelById(id) }
+                
+                val musicChannel = actualConfig.activeMusicChannelId?.let { repository.getChannelById(it) }
+                _musicState.update { it.copy(activeChannel = musicChannel) }
 
-                if (_activeEpisodeId.value == null && actualConfig.activePodcastEpisodeId != null) {
-                    _activeEpisodeId.value = actualConfig.activePodcastEpisodeId
-                }
+                val radioChannel = actualConfig.activeRadioChannelId?.let { repository.getChannelById(it) }
+                _radioState.update { it.copy(activeChannel = radioChannel) }
+
+                val podcastChannel = actualConfig.activePodcastChannelId?.let { repository.getChannelById(it) }
+                val podcastEpisode = actualConfig.activePodcastEpisodeId?.let { podcastRepository.getEpisodeById(it) }
+                _podcastState.update { it.copy(activeChannel = podcastChannel, activeEpisode = podcastEpisode) }
             }
         }
+
 
         viewModelScope.launch {
             configDao.getConfig().first()?.let { config ->
@@ -180,36 +169,52 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
+            
+            // Sync play state to podcast if it's a podcast
+            _podcastState.update { 
+                it.copy(isPlayingActiveEpisode = isPlaying && it.activeEpisode?.id?.toString() == mediaController?.currentMediaItem?.mediaId) 
+            }
+
             if (!isRefreshing) viewModelScope.launch { saveCurrentPlaybackState() }
         }
 
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
             val title = mediaMetadata.title?.toString()
             val artist = mediaMetadata.artist?.toString()
-            val station = mediaMetadata.station?.toString() ?: mediaMetadata.albumTitle?.toString()
+            val album = mediaMetadata.albumTitle?.toString()
+            val station = mediaMetadata.station?.toString() ?: album
 
-            if (artist != null && title != null) {
-                _streamMetadata.value = "$artist - $title"
-                _currentTrackArtist.value = artist
-            } else if (title != null) {
-                _streamMetadata.value = title
-            }
-            if (mediaMetadata.albumTitle != null) {
-                _currentTrackAlbum.value = mediaMetadata.albumTitle.toString()
-            }
-
-            // Auto-discovery for Radio Station names
-            val activeRadio = _activeRadioChannel.value
-            if (activeRadio != null && !station.isNullOrBlank() && 
-                (activeRadio.name.isBlank() || activeRadio.name.contains("Loading") || activeRadio.name == "New Radio")) {
-                viewModelScope.launch {
-                    val updated = activeRadio.copy(name = station)
-                    repository.updateChannel(updated)
-                    _activeRadioChannel.value = updated
-                    if (_activeChannelId.value == activeRadio.id) {
-                        _currentTrackName.value = station
+            // Update Radio State specifically
+            if (_appConfig.value.lastCategory == "RADIO") {
+                _radioState.update { it.copy(streamMetadata = if (artist != null && title != null) "$artist - $title" else title) }
+                
+                // Auto-discovery for Radio Station names
+                val activeRadio = _radioState.value.activeChannel
+                if (activeRadio != null && !station.isNullOrBlank() && 
+                    (activeRadio.name.isBlank() || activeRadio.name.contains("Loading") || activeRadio.name == "New Radio")) {
+                    viewModelScope.launch {
+                        val updated = activeRadio.copy(name = station)
+                        repository.updateChannel(updated)
+                        _radioState.update { it.copy(activeChannel = updated) }
                     }
                 }
+            }
+            
+            // Update Music State specifically
+            if (_appConfig.value.lastCategory == "MUSIC") {
+                _musicState.update { it.copy(
+                    currentTrackName = title ?: "",
+                    currentTrackArtist = artist,
+                    currentTrackAlbum = album
+                ) }
+            }
+            
+            // Update Podcast State specifically
+            if (_appConfig.value.lastCategory == "PODCASTS") {
+                _podcastState.update { it.copy(
+                    currentTrackName = title ?: it.activeEpisode?.title ?: "",
+                    currentTrackArtist = artist ?: it.activeEpisode?.podcastTitle
+                ) }
             }
         }
 
@@ -221,10 +226,17 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             when (playbackState) {
-                Player.STATE_BUFFERING -> _streamMetadata.value = "Buffering..."
+                Player.STATE_BUFFERING -> {
+                    if (_appConfig.value.lastCategory == "RADIO") {
+                        _radioState.update { it.copy(streamMetadata = "Buffering...") }
+                    }
+                }
                 Player.STATE_READY -> {
                     if (!isRefreshing) {
-                        _durationMs.value = mediaController?.duration?.coerceAtLeast(0) ?: 0L
+                        val dur = mediaController?.duration?.coerceAtLeast(0) ?: 0L
+                        val cat = _appConfig.value.lastCategory
+                        if (cat == "MUSIC") _musicState.update { it.copy(durationMs = dur) }
+                        if (cat == "PODCASTS") _podcastState.update { it.copy(durationMs = dur) }
                         updateCurrentTrackInfo()
                     }
                 }
@@ -233,7 +245,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-            _streamMetadata.value = "Error: ${error.localizedMessage ?: "Playback failed"}"
+            if (_appConfig.value.lastCategory == "RADIO") {
+                _radioState.update { it.copy(streamMetadata = "Error: ${error.localizedMessage ?: "Playback failed"}") }
+            }
             _isPlaying.value = false
         }
 
@@ -254,20 +268,17 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     mediaController?.let {
                         val pos = it.currentPosition.coerceAtLeast(0L)
                         val dur = it.duration
-                        _currentPositionMs.value = pos
-                        if (dur > 0) _durationMs.value = dur
+                        val cat = _appConfig.value.lastCategory
                         
-                        activeEpisode.value?.let { episode ->
-                            // Robust check: Only update if the player is actually playing THIS episode
-                            // and has valid duration/position (avoiding 0 resets during load)
+                        if (cat == "MUSIC") _musicState.update { s -> s.copy(positionMs = pos, durationMs = if (dur > 0) dur else s.durationMs) }
+                        if (cat == "PODCASTS") _podcastState.update { s -> s.copy(positionMs = pos, durationMs = if (dur > 0) dur else s.durationMs) }
+                        
+                        _podcastState.value.activeEpisode?.let { episode ->
                             val isCorrectItem = it.currentMediaItem?.mediaId == episode.id.toString()
                             val isReady = it.playbackState == Player.STATE_READY || it.playbackState == Player.STATE_BUFFERING
                             
-                            if (_activeChannelId.value == episode.channelId && isCorrectItem && isReady) {
-                                // Prevent saving 0 if we know we should be elsewhere (seek in progress)
-                                if (pos == 0L && episode.playbackPositionMs > 1000 && !it.isPlaying) {
-                                    // Ignore 0 during initial load/buffer
-                                } else {
+                            if (cat == "PODCASTS" && isCorrectItem && isReady) {
+                                if (!(pos == 0L && episode.playbackPositionMs > 1000 && !it.isPlaying)) {
                                     podcastRepository.updatePlaybackPosition(episode, pos, dur)
                                 }
                             }
@@ -288,34 +299,53 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         mediaController?.let { controller ->
             val item = controller.currentMediaItem ?: return
             val title = item.mediaMetadata.title?.toString() ?: ""
-            if (title.isNotEmpty()) _currentTrackName.value = title
-            _currentTrackArtist.value = item.mediaMetadata.artist?.toString()
-            _currentTrackAlbum.value = item.mediaMetadata.albumTitle?.toString()
-            _currentTrackIndex.value = controller.currentMediaItemIndex
+            val artist = item.mediaMetadata.artist?.toString()
+            val album = item.mediaMetadata.albumTitle?.toString()
+            val index = controller.currentMediaItemIndex
+            
             _currentMediaId.value = item.mediaId
+            
+            when(_appConfig.value.lastCategory) {
+                "MUSIC" -> _musicState.update { it.copy(
+                    currentTrackName = title,
+                    currentTrackArtist = artist,
+                    currentTrackAlbum = album,
+                    currentTrackIndex = index
+                ) }
+                "PODCASTS" -> {
+                    // We don't update podcast titles here as they are driven by the ActiveEpisode state
+                }
+            }
         }
     }
 
     fun selectChannel(channelId: Int, autoPlay: Boolean = true) {
+        // Optimization: If this channel is already active and loaded, just return
+        if (_activeChannelId.value == channelId && _musicState.value.audioFiles.isNotEmpty()) {
+            return
+        }
+        
         playerLoadJob?.cancel()
         playerLoadJob = viewModelScope.launch {
             if (!isRefreshing) saveCurrentPlaybackState()
-            _activeEpisodeId.value = null // Clear active episode if switching channels
+            
             val channel = repository.getChannelById(channelId) ?: return@launch
             repository.updateChannel(channel.copy(lastPlayedTime = System.currentTimeMillis()))
             _activeChannelId.value = channelId
             
             when (channel.type) {
                 ChannelType.FOLDER -> {
-                    _activeMusicChannel.value = channel
+                    _musicState.update { it.copy(activeChannel = channel) }
                     updateConfig { it.copy(activeMusicChannelId = channelId, lastCategory = "MUSIC") }
+                    _podcastState.update { it.copy(activeEpisode = null) } // Explicitly clear podcast spillover
                 }
                 ChannelType.RADIO -> {
-                    _activeRadioChannel.value = channel
+                    _radioState.update { it.copy(activeChannel = channel, streamMetadata = "Connecting...") }
                     updateConfig { it.copy(activeRadioChannelId = channelId, lastCategory = "RADIO") }
+                    _podcastState.update { it.copy(activeEpisode = null) }
                 }
                 ChannelType.PODCAST -> {
-                    _activePodcastChannel.value = channel
+                    _podcastState.update { it.copy(activeChannel = channel) }
                     updateConfig { it.copy(activePodcastChannelId = channelId, lastCategory = "PODCASTS") }
                 }
             }
@@ -325,23 +355,31 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     private suspend fun loadChannelIntoPlayer(channel: AudioChannel, autoPlay: Boolean) {
         isRefreshing = true
-        _currentTrackName.value = channel.currentTrackTitle ?: "Loading..."
-        _currentTrackArtist.value = channel.currentTrackArtist
-        _currentTrackAlbum.value = channel.currentTrackAlbum
-        _currentPositionMs.value = channel.currentPositionMs
-        _durationMs.value = channel.currentTrackDurationMs
+        
+        when(channel.type) {
+            ChannelType.FOLDER -> _musicState.update { it.copy(
+                currentTrackName = channel.currentTrackTitle ?: "Loading...",
+                currentTrackArtist = channel.currentTrackArtist,
+                currentTrackAlbum = channel.currentTrackAlbum,
+                positionMs = channel.currentPositionMs,
+                durationMs = channel.currentTrackDurationMs
+            ) }
+            ChannelType.RADIO -> _radioState.update { it.copy(streamMetadata = "Connecting...") }
+            else -> {}
+        }
 
         try {
             val controller = mediaController ?: return
             controller.stop()
             controller.clearMediaItems()
+            _musicState.update { it.copy(isLoading = true) }
             _currentMediaId.value = null
 
             when (channel.type) {
                 ChannelType.FOLDER -> {
                     if (channel.folderUri != null) {
                         val files = withContext(Dispatchers.IO) { folderScanner.scanFolder(Uri.parse(channel.folderUri)) }
-                        _audioFiles.value = files
+                        _musicState.update { it.copy(audioFiles = files, isLoading = false) }
                         if (files.isNotEmpty()) {
                             val mediaItems = files.map { file ->
                                 MediaItem.Builder()
@@ -367,7 +405,6 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
                 ChannelType.RADIO -> {
-                    _streamMetadata.value = "Connecting..."
                     if (channel.streamUrl != null) {
                         try {
                             val item = MediaItem.Builder().setUri(channel.streamUrl).setMediaMetadata(MediaMetadata.Builder().setTitle(channel.name).build()).build()
@@ -375,13 +412,15 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                             controller.prepare()
                             if (autoPlay) controller.play()
                         } catch (e: Exception) {
-                            _streamMetadata.value = "Error: ${e.message}"
+                            _radioState.update { it.copy(streamMetadata = "Error: ${e.message}") }
                         }
                     }
                 }
                 ChannelType.PODCAST -> {
                     podcastEpisodesJob?.cancel()
-                    podcastEpisodesJob = podcastRepository.getEpisodesForChannel(channel.id).onEach { _podcastEpisodes.value = it }.launchIn(viewModelScope)
+                    podcastEpisodesJob = podcastRepository.getEpisodesForChannel(channel.id)
+                        .onEach { episodes -> _podcastState.update { it.copy(episodes = episodes) } }
+                        .launchIn(viewModelScope)
                     podcastRepository.refreshFeed(channel.id, channel.streamUrl!!)
                 }
             }
@@ -390,37 +429,35 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             isRefreshing = false
             updateCurrentTrackInfo()
             saveCurrentPlaybackState()
+            _musicState.update { it.copy(isLoading = false) }
         }
     }
 
     suspend fun saveCurrentPlaybackState() {
         val channelId = _activeChannelId.value ?: return
         val controller = mediaController ?: return
-        val index = controller.currentMediaItemIndex
-        val item = controller.currentMediaItem
-        if (item == null) return
+        val item = controller.currentMediaItem ?: return
 
-        // Read all MediaController properties on the main thread (required by Media3)
         val currentPosition = controller.currentPosition.coerceAtLeast(0L)
         val duration = controller.duration
-        val mediaId = item?.mediaId
-        val title = item?.mediaMetadata?.title?.toString()
-        val artist = item?.mediaMetadata?.artist?.toString()
-        val album = item?.mediaMetadata?.albumTitle?.toString()
+        val mediaId = item.mediaId
+        val title = item.mediaMetadata.title?.toString()
+        val artist = item.mediaMetadata.artist?.toString()
+        val album = item.mediaMetadata.albumTitle?.toString()
+        val currentIndex = controller.currentMediaItemIndex
 
-        // Skip saving 0 if we are in a transition state (prevent resets)
         if (currentPosition == 0L && !isRefreshing) {
-            val activeEp = activeEpisode.value
+            val activeEp = _podcastState.value.activeEpisode
             if (activeEp != null && activeEp.id.toString() == mediaId && activeEp.playbackPositionMs > 1000) {
-                return // Likely a race condition during load
+                return
             }
         }
 
         val updatedChannel = withContext(Dispatchers.IO) {
             val channel = repository.getChannelById(channelId) ?: return@withContext null
             val updated = channel.copy(
-                currentTrackIndex = index,
-                currentTrackUri = mediaId ?: channel.currentTrackUri,
+                currentTrackIndex = currentIndex,
+                currentTrackUri = mediaId,
                 currentTrackTitle = title ?: channel.currentTrackTitle,
                 currentTrackArtist = artist ?: channel.currentTrackArtist,
                 currentTrackAlbum = album ?: channel.currentTrackAlbum,
@@ -433,9 +470,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
         if (updatedChannel != null) {
             when (updatedChannel.type) {
-                ChannelType.FOLDER -> _activeMusicChannel.value = updatedChannel
-                ChannelType.RADIO -> _activeRadioChannel.value = updatedChannel
-                ChannelType.PODCAST -> _activePodcastChannel.value = updatedChannel
+                ChannelType.FOLDER -> _musicState.update { it.copy(activeChannel = updatedChannel) }
+                ChannelType.RADIO -> _radioState.update { it.copy(activeChannel = updatedChannel) }
+                ChannelType.PODCAST -> _podcastState.update { it.copy(activeChannel = updatedChannel) }
             }
         }
     }
@@ -449,11 +486,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         mediaController?.stop()
         mediaController?.clearMediaItems()
         _activeChannelId.value = null
-        _activeEpisodeId.value = null
-        _activeMusicChannel.value = null
-        _activeRadioChannel.value = null
-        _activePodcastChannel.value = null
-        _podcastView.value = "RECENT"
+        
+        _musicState.update { it.copy(activeChannel = null) }
+        _radioState.update { it.copy(activeChannel = null) }
+        _podcastState.update { it.copy(activeChannel = null, activeEpisode = null) }
+        
         updateConfig { it.copy(
             activeMusicChannelId = null, 
             activeRadioChannelId = null, 
@@ -465,8 +502,21 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun next() = mediaController?.seekToNext()
     fun previous() = mediaController?.seekToPrevious()
     fun seekTo(pos: Long) = mediaController?.seekTo(pos)
-    fun toggleShuffle() { mediaController?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } }
-    fun toggleRepeat() { mediaController?.let { it.repeatMode = if (it.repeatMode == Player.REPEAT_MODE_ALL) Player.REPEAT_MODE_OFF else Player.REPEAT_MODE_ALL } }
+    
+    fun toggleShuffle() { 
+        mediaController?.let { 
+            it.shuffleModeEnabled = !it.shuffleModeEnabled 
+            _musicState.update { s -> s.copy(shuffleEnabled = it.shuffleModeEnabled) }
+        } 
+    }
+    
+    fun toggleRepeat() { 
+        mediaController?.let { 
+            val newMode = if (it.repeatMode == Player.REPEAT_MODE_ALL) Player.REPEAT_MODE_OFF else Player.REPEAT_MODE_ALL
+            it.repeatMode = newMode
+            _musicState.update { s -> s.copy(repeatEnabled = newMode == Player.REPEAT_MODE_ALL) }
+        } 
+    }
     fun setPlaybackSpeed(speed: Float) { mediaController?.setPlaybackSpeed(speed) }
 
     fun createChannel(name: String, type: ChannelType = ChannelType.FOLDER, streamUrl: String? = null) {
@@ -499,11 +549,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setFolder(uri: Uri, name: String) {
         viewModelScope.launch {
-            val channel = _activeMusicChannel.value ?: return@launch
+            val channel = _musicState.value.activeChannel ?: return@launch
             getApplication<SimpleMusicApp>().contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             val updated = channel.copy(folderUri = uri.toString(), folderDisplayName = name, currentTrackIndex = 0, currentTrackUri = null, currentTrackTitle = null, currentPositionMs = 0L)
             repository.updateChannel(updated)
-            _activeMusicChannel.value = updated
+            _musicState.update { it.copy(activeChannel = updated) }
             loadChannelIntoPlayer(updated, autoPlay = true)
         }
     }
@@ -533,16 +583,18 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     val json = URL(url).readText()
                     val type = object : TypeToken<List<Map<String, Any>>>() {}.type
                     val results: List<Map<String, Any>> = gson.fromJson(json, type)
-                    _radioSearchResults.value = results.take(20).map {
-                        RadioStationResult(
-                            name = it["name"] as? String ?: "Unknown",
-                            url = it["url_resolved"] as? String ?: it["url"] as? String ?: "",
-                            favicon = it["favicon"] as? String,
-                            country = it["country"] as? String
-                        )
+                    _radioState.update { s ->
+                        s.copy(searchResults = results.take(20).map {
+                            RadioStationResult(
+                                name = it["name"] as? String ?: "Unknown",
+                                url = it["url_resolved"] as? String ?: it["url"] as? String ?: "",
+                                favicon = it["favicon"] as? String,
+                                country = it["country"] as? String
+                            )
+                        })
                     }
                 } catch (e: Exception) {
-                    _radioSearchResults.value = emptyList()
+                    _radioState.update { it.copy(searchResults = emptyList()) }
                 }
             }
         }
@@ -581,7 +633,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setPodcastView(view: String) {
-        _podcastView.value = view
+        _podcastState.update { it.copy(currentView = view) }
     }
 
     fun downloadEpisode(episode: PodcastEpisode) = viewModelScope.launch { podcastRepository.downloadEpisode(episode) }
@@ -606,7 +658,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setPodcastFeed(url: String) {
         viewModelScope.launch {
-            val channel = _activePodcastChannel.value ?: return@launch
+            val channel = _podcastState.value.activeChannel ?: return@launch
             repository.updateChannel(channel.copy(streamUrl = url))
             selectChannel(channel.id)
         }
@@ -624,7 +676,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setActiveEpisode(episode: PodcastEpisode?) {
-        _activeEpisodeId.value = episode?.id
+        _podcastState.update { it.copy(activeEpisode = episode) }
         updateConfig { it.copy(activePodcastEpisodeId = episode?.id) }
     }
 
@@ -645,9 +697,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 ) }
 
                 // 2. Update UI tracking
-                _currentTrackName.value = episode.title
-                _currentPositionMs.value = episode.playbackPositionMs
-                _durationMs.value = episode.durationMs
+                _podcastState.update { it.copy(
+                    positionMs = episode.playbackPositionMs,
+                    durationMs = episode.durationMs,
+                    isPlayingActiveEpisode = true
+                ) }
 
                 // 3. Load into ExoPlayer
                 mediaController?.let { controller ->
@@ -657,7 +711,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     val item = MediaItem.Builder()
                         .setMediaId(episode.id.toString())
                         .setUri(uri)
-                        .setMediaMetadata(MediaMetadata.Builder().setTitle(episode.title).build())
+                        .setMediaMetadata(
+                            MediaMetadata.Builder()
+                                .setTitle(episode.title)
+                                .setArtist(episode.podcastTitle)
+                                .build()
+                        )
                         .build()
                     controller.setMediaItems(listOf(item), 0, episode.playbackPositionMs)
                     controller.prepare()
@@ -701,6 +760,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             podcastRepository.downloadAllNew()
         }
+    }
+
+    fun launchClock() {
+        SystemApps.launchClock(app)
     }
 
     override fun onCleared() {

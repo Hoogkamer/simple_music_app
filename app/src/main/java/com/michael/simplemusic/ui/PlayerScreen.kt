@@ -60,26 +60,13 @@ fun PlayerScreen(
     val allChannels by viewModel.allChannels.collectAsStateWithLifecycle()
     val appConfig by viewModel.appConfig.collectAsStateWithLifecycle()
     
-    val activeMusicChannel by viewModel.activeMusicChannel.collectAsStateWithLifecycle()
-    val activeRadioChannel by viewModel.activeRadioChannel.collectAsStateWithLifecycle()
-    val activePodcastChannel by viewModel.activePodcastChannel.collectAsStateWithLifecycle()
+    val musicState by viewModel.musicState.collectAsStateWithLifecycle()
+    val radioState by viewModel.radioState.collectAsStateWithLifecycle()
+    val podcastState by viewModel.podcastState.collectAsStateWithLifecycle()
     
     val activeChannelId by viewModel.activeChannelId.collectAsStateWithLifecycle()
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
     val playbackSpeed by viewModel.playbackSpeed.collectAsStateWithLifecycle()
-    val currentTrackName by viewModel.currentTrackName.collectAsStateWithLifecycle()
-    val currentTrackArtist by viewModel.currentTrackArtist.collectAsStateWithLifecycle()
-    val currentTrackAlbum by viewModel.currentTrackAlbum.collectAsStateWithLifecycle()
-    val currentTrackIndex by viewModel.currentTrackIndex.collectAsStateWithLifecycle()
-    val streamMetadata by viewModel.streamMetadata.collectAsStateWithLifecycle()
-    val currentPositionMs by viewModel.currentPositionMs.collectAsStateWithLifecycle()
-    val durationMs by viewModel.durationMs.collectAsStateWithLifecycle()
-    val audioFiles by viewModel.audioFiles.collectAsStateWithLifecycle()
-    val podcastEpisodes by viewModel.podcastEpisodes.collectAsStateWithLifecycle()
-    val recentEpisodes by viewModel.recentEpisodes.collectAsStateWithLifecycle()
-    val podcastView by viewModel.podcastView.collectAsStateWithLifecycle()
-    val activePodcastEpisode by viewModel.activeEpisode.collectAsStateWithLifecycle()
-    val radioSearchResults by viewModel.radioSearchResults.collectAsStateWithLifecycle()
     val currentMediaId by viewModel.currentMediaId.collectAsStateWithLifecycle()
 
     var showAddStation by remember { mutableStateOf(false) }
@@ -114,7 +101,7 @@ fun PlayerScreen(
         mutableStateOf(
             when (appConfig.lastCategory) {
                 "MUSIC" -> appConfig.activeMusicChannelId != null
-                "RADIO" -> false // Radio always uses mini-player
+                "RADIO" -> false 
                 "PODCASTS" -> appConfig.activePodcastEpisodeId != null
                 else -> false
             }
@@ -192,13 +179,13 @@ fun PlayerScreen(
                 title = { 
                     Text(
                         if (isPlayerVisible && currentDestination == NavigationDestination.MUSIC) {
-                            activeMusicChannel?.name ?: "Player"
+                            musicState.activeChannel?.name ?: "Player"
                         } else {
                             when(currentDestination) {
                                 NavigationDestination.MUSIC -> "Music Decks"
                                 NavigationDestination.RADIO -> "Radio Stations"
                                 NavigationDestination.PODCASTS -> {
-                                    if (isPlayerVisible && activePodcastEpisode != null) {
+                                    if (isPlayerVisible && podcastState.activeEpisode != null) {
                                         "Now Playing"
                                     } else {
                                         when(podcastNav) {
@@ -234,6 +221,9 @@ fun PlayerScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { viewModel.launchClock() }) {
+                        Icon(Icons.Default.AccessTime, contentDescription = "Open Clock")
+                    }
                     if (currentDestination == NavigationDestination.PODCASTS && podcastNav == PodcastNavigation.SHOW_DETAIL) {
                         IconButton(onClick = { viewModel.markAllAsPlayed(selectedPodcastId) }) {
                             Icon(Icons.Default.DoneAll, "Mark all played")
@@ -284,16 +274,34 @@ fun PlayerScreen(
                             },
                             color = MaterialTheme.colorScheme.secondaryContainer
                         ) {
+                            val miniPlayerTitle = when(appConfig.lastCategory) {
+                                "MUSIC" -> musicState.currentTrackName
+                                "RADIO" -> radioState.streamMetadata ?: "Radio"
+                                "PODCASTS" -> podcastState.currentTrackName.ifEmpty { podcastState.activeEpisode?.title ?: "Podcast" }
+                                else -> "Total Audio Hub"
+                            }
+                            val miniPlayerArtist = when(appConfig.lastCategory) {
+                                "MUSIC" -> musicState.currentTrackArtist
+                                "RADIO" -> null
+                                "PODCASTS" -> podcastState.currentTrackArtist ?: podcastState.activeEpisode?.podcastTitle
+                                else -> null
+                            }
+                            val miniPlayerProgress = when(appConfig.lastCategory) {
+                                "MUSIC" -> if (musicState.durationMs > 0) musicState.positionMs.toFloat() / musicState.durationMs else 0f
+                                "PODCASTS" -> if (podcastState.durationMs > 0) podcastState.positionMs.toFloat() / podcastState.durationMs else 0f
+                                else -> 0f
+                            }
+
                             Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.MusicNote, null, tint = MaterialTheme.colorScheme.primary)
                                 Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                                    Text(currentTrackName.ifEmpty { streamMetadata ?: "Total Audio Hub" }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    if (!currentTrackArtist.isNullOrBlank()) Text(currentTrackArtist!!, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    if (durationMs > 0) LinearProgressIndicator(progress = { (currentPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp).height(2.dp))
+                                    Text(miniPlayerTitle, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    if (!miniPlayerArtist.isNullOrBlank()) Text(miniPlayerArtist, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    if (miniPlayerProgress > 0) LinearProgressIndicator(progress = { miniPlayerProgress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp).height(2.dp))
                                 }
                                 IconButton(onClick = { 
-                                    if (currentDestination == NavigationDestination.PODCASTS && activePodcastEpisode != null && activeChannelId != activePodcastEpisode?.channelId) {
-                                        viewModel.playPodcastEpisode(activePodcastEpisode!!)
+                                    if (currentDestination == NavigationDestination.PODCASTS && podcastState.activeEpisode != null && activeChannelId != podcastState.activeEpisode?.channelId) {
+                                        viewModel.playPodcastEpisode(podcastState.activeEpisode!!)
                                     } else {
                                         viewModel.playPause()
                                     }
@@ -349,36 +357,37 @@ fun PlayerScreen(
                 NavigationDestination.MUSIC -> {
                     MusicDashboard(
                         channels = allChannels.filter { it.type == ChannelType.FOLDER },
+                        isLoading = musicState.isLoading,
                         activeChannelId = activeChannelId,
                         isPlaying = isPlaying,
-                        currentPositionMs = currentPositionMs,
-                        currentDurationMs = durationMs,
+                        currentPositionMs = musicState.positionMs,
+                        currentDurationMs = musicState.durationMs,
                         isPlayerVisible = isPlayerVisible,
-                        activeChannel = activeMusicChannel,
-                        audioFiles = audioFiles,
-                        currentTrackName = currentTrackName,
-                        currentTrackArtist = currentTrackArtist,
-                        currentTrackAlbum = currentTrackAlbum,
-                        currentTrackIndex = currentTrackIndex,
+                        activeChannel = musicState.activeChannel,
+                        audioFiles = musicState.audioFiles,
+                        currentTrackName = musicState.currentTrackName,
+                        currentTrackArtist = musicState.currentTrackArtist,
+                        currentTrackAlbum = musicState.currentTrackAlbum,
+                        currentTrackIndex = musicState.currentTrackIndex,
                         onChannelClick = { viewModel.selectChannel(it); isPlayerVisible = true },
                         onDeleteChannel = { viewModel.deleteChannel(it) },
                         onRenameChannel = { id, name -> viewModel.renameChannel(id, name) },
                         onCreateChannel = { showAddMusic = true },
                         onFolderPick = { 
-                            val initialUri = activeMusicChannel?.folderUri?.let { Uri.parse(it) }
+                            val initialUri = musicState.activeChannel?.folderUri?.let { Uri.parse(it) }
                             folderPickerLauncher.launch(initialUri)
                         },
                         onPlayPause = { 
-                            val channel = activeMusicChannel
+                            val channel = musicState.activeChannel
                             if (channel != null && activeChannelId != channel.id) {
                                 viewModel.selectChannel(channel.id, autoPlay = true)
                             } else {
                                 viewModel.playPause()
                             }
                         },
-                        onNext = { if (activeChannelId == activeMusicChannel?.id) viewModel.next() },
-                        onPrevious = { if (activeChannelId == activeMusicChannel?.id) viewModel.previous() },
-                        onSeek = { if (activeChannelId == activeMusicChannel?.id) viewModel.seekTo(it) },
+                        onNext = { if (activeChannelId == musicState.activeChannel?.id) viewModel.next() },
+                        onPrevious = { if (activeChannelId == musicState.activeChannel?.id) viewModel.previous() },
+                        onSeek = { if (activeChannelId == musicState.activeChannel?.id) viewModel.seekTo(it) },
                         onToggleShuffle = { viewModel.toggleShuffle() },
                         onToggleRepeat = { viewModel.toggleRepeat() }
                     )
@@ -388,7 +397,7 @@ fun PlayerScreen(
                         channels = allChannels.filter { it.type == ChannelType.RADIO },
                         activeChannelId = activeChannelId,
                         isPlaying = isPlaying,
-                        streamMetadata = streamMetadata,
+                        streamMetadata = radioState.streamMetadata,
                         onChannelClick = { if (activeChannelId == it && isPlaying) viewModel.stopRadio() else viewModel.selectChannel(it) },
                         onDeleteChannel = { viewModel.deleteChannel(it) },
                         onRenameChannel = { id, name -> viewModel.renameChannel(id, name) },
@@ -398,23 +407,23 @@ fun PlayerScreen(
                     )
                 }
                 NavigationDestination.PODCASTS -> {
-                    if (isPlayerVisible && activePodcastEpisode != null) {
+                    if (isPlayerVisible && podcastState.activeEpisode != null) {
                         PodcastPlayer(
-                            activeEpisode = activePodcastEpisode!!,
-                            isPlaying = isPlaying && currentMediaId == activePodcastEpisode?.id?.toString(),
+                            activeEpisode = podcastState.activeEpisode!!,
+                            isPlaying = isPlaying && currentMediaId == podcastState.activeEpisode?.id?.toString(),
                             playbackSpeed = playbackSpeed,
-                            currentPositionMs = if (currentMediaId == activePodcastEpisode?.id?.toString() && durationMs > 0) currentPositionMs else activePodcastEpisode!!.playbackPositionMs,
-                            durationMs = if (currentMediaId == activePodcastEpisode?.id?.toString() && durationMs > 0) durationMs else activePodcastEpisode!!.durationMs,
+                            currentPositionMs = if (currentMediaId == podcastState.activeEpisode?.id?.toString() && podcastState.durationMs > 0) podcastState.positionMs else podcastState.activeEpisode!!.playbackPositionMs,
+                            durationMs = if (currentMediaId == podcastState.activeEpisode?.id?.toString() && podcastState.durationMs > 0) podcastState.durationMs else podcastState.activeEpisode!!.durationMs,
                             onPlayPause = {
-                                if (activeChannelId == activePodcastEpisode?.channelId) {
+                                if (activeChannelId == podcastState.activeEpisode?.channelId) {
                                     viewModel.playPause()
                                 } else {
-                                    activePodcastEpisode?.let { viewModel.playPodcastEpisode(it) }
+                                    podcastState.activeEpisode?.let { viewModel.playPodcastEpisode(it) }
                                 }
                             },
-                            onSkipBack = { if (activeChannelId == activePodcastEpisode?.channelId) viewModel.skipBack() },
-                            onSkipForward = { if (activeChannelId == activePodcastEpisode?.channelId) viewModel.skipForward() },
-                            onSeek = { if (activeChannelId == activePodcastEpisode?.channelId) viewModel.seekTo(it) },
+                            onSkipBack = { if (activeChannelId == podcastState.activeEpisode?.channelId) viewModel.skipBack() },
+                            onSkipForward = { if (activeChannelId == podcastState.activeEpisode?.channelId) viewModel.skipForward() },
+                            onSeek = { if (activeChannelId == podcastState.activeEpisode?.channelId) viewModel.seekTo(it) },
                             onSpeedChange = { viewModel.setPlaybackSpeed(it) }
                         )
                     } else {
@@ -422,8 +431,8 @@ fun PlayerScreen(
                             PodcastNavigation.DASHBOARD -> {
                                 PodcastDashboard(
                                     channels = allChannels.filter { it.type == ChannelType.PODCAST },
-                                    recentEpisodes = recentEpisodes,
-                                    activeView = podcastView,
+                                    recentEpisodes = podcastState.recentEpisodes,
+                                    activeView = podcastState.currentView,
                                     onChannelClick = { id -> selectedPodcastId = id; viewModel.selectChannel(id); podcastNav = PodcastNavigation.SHOW_DETAIL },
                                     onEpisodeClick = { viewModel.setActiveEpisode(it); cameFromRecent = true; podcastNav = PodcastNavigation.EPISODE_DETAIL },
                                     onPlayEpisode = { viewModel.playPodcastEpisode(it) },
@@ -441,7 +450,7 @@ fun PlayerScreen(
                             }
                             PodcastNavigation.SHOW_DETAIL -> {
                                 PodcastShowDetail(
-                                    episodes = if (appConfig.hidePlayedEpisodes) podcastEpisodes.filter { !it.isFinished } else podcastEpisodes,
+                                    episodes = if (appConfig.hidePlayedEpisodes) podcastState.episodes.filter { !it.isFinished } else podcastState.episodes,
                                     onEpisodeClick = { viewModel.setActiveEpisode(it); cameFromRecent = false; podcastNav = PodcastNavigation.EPISODE_DETAIL },
                                     onPlayEpisode = { viewModel.playPodcastEpisode(it) },
                                     onDownload = { viewModel.downloadEpisode(it) },
@@ -452,14 +461,14 @@ fun PlayerScreen(
                                 )
                             }
                             PodcastNavigation.EPISODE_DETAIL -> {
-                                activePodcastEpisode?.let { episode ->
+                                podcastState.activeEpisode?.let { episode ->
                                     EpisodeDetailScreen(
                                         episode = episode,
                                         isActive = currentMediaId == episode.id.toString(),
                                         isPlaying = isPlaying,
                                         playbackSpeed = playbackSpeed,
-                                        currentPositionMs = currentPositionMs,
-                                        durationMs = durationMs,
+                                        currentPositionMs = podcastState.positionMs,
+                                        durationMs = podcastState.durationMs,
                                         onPlay = { viewModel.playPodcastEpisode(it) },
                                         onPause = { viewModel.playPause() },
                                         onSeek = { viewModel.seekTo(it) },
@@ -483,7 +492,7 @@ fun PlayerScreen(
         if (showAddStation) AddChannelScreen(title = "Add Radio Station", nameLabel = "Station Name", urlLabel = "Stream URL (http/https)", onSave = { name, url -> viewModel.createChannel(name, ChannelType.RADIO, url); showAddStation = false }, onDismiss = { showAddStation = false })
         if (showAddPodcast) AddPodcastScreen(onSave = { url -> viewModel.createChannel("", ChannelType.PODCAST, url); showAddPodcast = false }, onDismiss = { showAddPodcast = false })
         if (showAddMusic) AddMusicDeckScreen(onSave = { name -> viewModel.createChannel(name, ChannelType.FOLDER); showAddMusic = false }, onDismiss = { showAddMusic = false })
-        if (showRadioSearch) RadioSearchDialog(results = radioSearchResults, onSearch = { viewModel.searchRadioStations(it) }, onSelect = { result -> viewModel.createChannel(result.name, ChannelType.RADIO, result.url); showRadioSearch = false }, onDismiss = { showRadioSearch = false })
+        if (showRadioSearch) RadioSearchDialog(results = radioState.searchResults, onSearch = { viewModel.searchRadioStations(it) }, onSelect = { result -> viewModel.createChannel(result.name, ChannelType.RADIO, result.url); showRadioSearch = false }, onDismiss = { showRadioSearch = false })
         
         if (showBulkImport) BulkImportDialog(
             title = "Bulk Import Radio Stations",
@@ -502,8 +511,13 @@ fun PlayerScreen(
 }
 
 @Composable
-fun MusicDashboard(channels: List<AudioChannel>, activeChannelId: Int?, isPlaying: Boolean, currentPositionMs: Long, currentDurationMs: Long, isPlayerVisible: Boolean, activeChannel: AudioChannel?, audioFiles: List<com.michael.simplemusic.scanner.AudioFile>, currentTrackName: String, currentTrackArtist: String?, currentTrackAlbum: String?, currentTrackIndex: Int, onChannelClick: (Int) -> Unit, onDeleteChannel: (Int) -> Unit, onRenameChannel: (Int, String) -> Unit, onCreateChannel: () -> Unit, onFolderPick: () -> Unit, onPlayPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit, onToggleShuffle: () -> Unit, onToggleRepeat: () -> Unit) {
-    if (isPlayerVisible && activeChannel != null) {
+fun MusicDashboard(channels: List<AudioChannel>, isLoading: Boolean, activeChannelId: Int?, isPlaying: Boolean, currentPositionMs: Long, currentDurationMs: Long, isPlayerVisible: Boolean, activeChannel: AudioChannel?, audioFiles: List<com.michael.simplemusic.scanner.AudioFile>, currentTrackName: String, currentTrackArtist: String?, currentTrackAlbum: String?, currentTrackIndex: Int, onChannelClick: (Int) -> Unit, onDeleteChannel: (Int) -> Unit, onRenameChannel: (Int, String) -> Unit, onCreateChannel: () -> Unit, onFolderPick: () -> Unit, onPlayPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit, onToggleShuffle: () -> Unit, onToggleRepeat: () -> Unit) {
+    if (isLoading) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+            Text("Scanning folder...", modifier = Modifier.padding(top = 80.dp))
+        }
+    } else if (isPlayerVisible && activeChannel != null) {
         Box(modifier = Modifier.padding(16.dp)) {
             FolderPlayer(activeChannel, audioFiles, isPlaying && activeChannelId == activeChannel.id, if (activeChannelId == activeChannel.id) currentTrackName else activeChannel.currentTrackTitle ?: "", if (activeChannelId == activeChannel.id) currentTrackArtist else activeChannel.currentTrackArtist, if (activeChannelId == activeChannel.id) currentTrackAlbum else activeChannel.currentTrackAlbum, currentTrackIndex, if (activeChannelId == activeChannel.id) currentPositionMs else activeChannel.currentPositionMs, if (activeChannelId == activeChannel.id) currentDurationMs else activeChannel.currentTrackDurationMs, false, true, onFolderPick, onPlayPause, onNext, onPrevious, onSeek, onToggleShuffle, onToggleRepeat)
         }

@@ -106,9 +106,9 @@ Manages individual episodes for the Podcast module.
 
 ## 6. State Management
 
-As this is "three applications in one," the app manages the state of each module independently. Navigation is handled via a bottom bar with three primary destinations. A persistent Mini Player at the bottom of the screen provides global control and status for the currently active audio source.
-
-**App Startup:** On cold launch, the app restores the last active module and channel from persistence, preparing playback at the last known position without auto-playing. All podcast feeds are refreshed in the background.
+**App Startup & Hub Mode:** On cold launch, the app restores the last active module and channel from persistence, preparing playback at the last known position. 
+- **Launcher Mode:** The app is configured with `CATEGORY_HOME`, allowing it to serve as the device's default launcher for dedicated hardware setups.
+- **System Integration:** Includes a utility to launch the system Clock/Alarm app directly from the hub interface.
 
 ### Music Module (Decks)
 
@@ -152,7 +152,7 @@ Manages complex states for multiple subscriptions and individual episode progres
 
 ### Global State & UI Components
 
-A shared state layer ensures seamless switching between modules.
+A shared state layer ensures seamless switching between modules using an MVI-lite pattern (`MusicState`, `RadioState`, `PodcastState`).
 
 *   **Global Persistence (`AppConfig`):** Tracks the last active module (`lastCategory`), active item IDs per module (Deck/Station/Podcast/Episode), and user preferences (e.g., `hidePlayedEpisodes`). Playback positions are persisted per-channel and per-episode in their respective tables.
 *   **Mini Player:** A persistent bar at the bottom of the UI showing current metadata, progress, and a play/pause button.

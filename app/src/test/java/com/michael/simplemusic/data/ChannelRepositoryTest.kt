@@ -1,12 +1,15 @@
 package com.michael.simplemusic.data
 
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
 import org.mockito.Mock
 import org.mockito.Mockito.verify
 import org.mockito.MockitoAnnotations
+import org.mockito.junit.MockitoJUnitRunner
 
+@RunWith(MockitoJUnitRunner::class)
 class ChannelRepositoryTest {
 
     @Mock
@@ -16,39 +19,38 @@ class ChannelRepositoryTest {
 
     @Before
     fun setup() {
-        MockitoAnnotations.openMocks(this)
         repository = ChannelRepository(dao)
     }
 
     @Test
-    fun getChannelByIdDelegatesToDao() = runBlocking {
+    fun getChannelByIdDelegatesToDao() = runTest {
         repository.getChannelById(1)
         verify(dao).getChannelById(1)
     }
 
     @Test
-    fun insertChannelDelegatesToDao() = runBlocking {
+    fun insertChannelDelegatesToDao() = runTest {
         val channel = AudioChannel(name = "Test")
         repository.insertChannel(channel)
         verify(dao).insertChannel(channel)
     }
 
     @Test
-    fun updateChannelDelegatesToDao() = runBlocking {
+    fun updateChannelDelegatesToDao() = runTest {
         val channel = AudioChannel(id = 1, name = "Test")
         repository.updateChannel(channel)
         verify(dao).updateChannel(channel)
     }
 
     @Test
-    fun deleteChannelDelegatesToDao() = runBlocking {
+    fun deleteChannelDelegatesToDao() = runTest {
         val channel = AudioChannel(id = 1, name = "Test")
         repository.deleteChannel(channel)
         verify(dao).deleteChannel(channel)
     }
 
     @Test
-    fun getChannelCountDelegatesToDao() = runBlocking {
+    fun getChannelCountDelegatesToDao() = runTest {
         repository.getChannelCount()
         verify(dao).getChannelCount()
     }
