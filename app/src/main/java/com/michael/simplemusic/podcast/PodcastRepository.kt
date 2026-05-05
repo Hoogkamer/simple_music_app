@@ -4,14 +4,13 @@ import com.michael.simplemusic.data.PodcastEpisode
 import com.michael.simplemusic.data.PodcastEpisodeDao
 import com.michael.simplemusic.data.AudioChannel
 import com.michael.simplemusic.data.ChannelType
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withContext
 import androidx.work.*
 import java.io.File
-import java.io.FileOutputStream
 import java.net.URL
+import java.net.HttpURLConnection
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 
 class PodcastRepository(private val context: android.content.Context, private val dao: PodcastEpisodeDao, private val baseDir: File) {
     private val parser = PodcastParser()
@@ -30,20 +29,28 @@ class PodcastRepository(private val context: android.content.Context, private va
         return dao.getEpisodeFlowById(id)
     }
 
-    suspend fun refreshFeed(channelId: Int, feedUrl: String): String? {
+    suspend fun refreshFeed(channelId: Int, feedUrl: String, sinceDate: Long? = null): Pair<String?, Int> {
         return withContext(Dispatchers.IO) {
             try {
-                val inputStream = URL(feedUrl).openStream()
-                val (title, episodes) = parser.parse(inputStream, channelId)
-                
-                // Insert new episodes (IGNORE on conflict ensures we don't overwrite played state)
-                episodes.forEach { episode ->
-                    dao.insertEpisode(episode)
+                withTimeout(15000) { // 15s timeout
+                    val connection = URL(feedUrl).openConnection() as HttpURLConnection
+                    connection.connectTimeout = 10000
+                    connection.readTimeout = 10000
+                    
+                    val inputStream = connection.inputStream
+                    val (title, episodes) = parser.parse(inputStream, channelId, sinceDate)
+                    
+                    var newCount = 0
+                    episodes.forEach { episode ->
+                        if (dao.insertEpisode(episode) != -1L) {
+                            newCount++
+                        }
+                    }
+                    title to newCount
                 }
-                title
             } catch (e: Exception) {
                 e.printStackTrace()
-                null
+                null to 0
             }
         }
     }
@@ -166,13 +173,33 @@ class PodcastRepository(private val context: android.content.Context, private va
             }
         }
     }
-    suspend fun refreshAllFeeds(channels: List<AudioChannel>) {
-        withContext(Dispatchers.IO) {
-            channels.filter { it.type == ChannelType.PODCAST }.forEach { channel ->
-                channel.streamUrl?.let { url ->
-                    refreshFeed(channel.id, url)
+    suspend fun refreshAllFeeds(channels: List<AudioChannel>, sinceDate: Long? = null, onProgress: ((Int, Int) -> Unit)? = null): Int {
+        return withContext(Dispatchers.IO) {
+            coroutineScope {
+                val podcastChannels = channels.filter { it.type == ChannelType.PODCAST && it.streamUrl != null }
+                val total = podcastChannels.size
+                var completed = 0
+                val deferreds = podcastChannels.map { channel ->
+                    async {
+                        val result = refreshFeed(channel.id, channel.streamUrl!!, sinceDate)
+                        synchronized(this@coroutineScope) {
+                            completed++
+                            onProgress?.invoke(completed, total)
+                        }
+                        result.second
+                    }
                 }
+                deferreds.awaitAll().sum()
             }
         }
+    }
+
+    fun getInProgressChannelIds(): Flow<List<Int>> = dao.getInProgressChannelIds()
+
+    suspend fun getDownloadProgress(): Pair<Int, Int> {
+        val twoWeeksAgo = System.currentTimeMillis() - (14L * 24 * 60 * 60 * 1000)
+        val pending = dao.getPendingDownloadCount(twoWeeksAgo)
+        val downloaded = dao.getDownloadedCount(twoWeeksAgo)
+        return pending to downloaded
     }
 }

@@ -10,6 +10,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -18,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -43,6 +47,7 @@ import android.text.Html
 import android.text.method.LinkMovementMethod
 import android.widget.TextView
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.*
 
 enum class NavigationDestination {
     MUSIC, RADIO, PODCASTS
@@ -68,6 +73,7 @@ fun PlayerScreen(
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
     val playbackSpeed by viewModel.playbackSpeed.collectAsStateWithLifecycle()
     val currentMediaId by viewModel.currentMediaId.collectAsStateWithLifecycle()
+    val systemApps by viewModel.systemApps.collectAsStateWithLifecycle()
 
     var showAddStation by remember { mutableStateOf(false) }
     var showBulkImport by remember { mutableStateOf(false) }
@@ -75,6 +81,8 @@ fun PlayerScreen(
     var showAddPodcast by remember { mutableStateOf(false) }
     var showAddMusic by remember { mutableStateOf(false) }
     var showRadioSearch by remember { mutableStateOf(false) }
+    var showPodcastSearch by remember { mutableStateOf(false) }
+    var showAppDrawer by remember { mutableStateOf(false) }
     val pendingMarkPlayed by viewModel.pendingMarkPlayed.collectAsStateWithLifecycle()
     
     var currentDestination by remember { 
@@ -96,6 +104,17 @@ fun PlayerScreen(
     }
     var cameFromRecent by remember { mutableStateOf(false) }
     var selectedPodcastId by remember { mutableIntStateOf(appConfig.activePodcastChannelId ?: -1) }
+    
+    LaunchedEffect(podcastState.activeEpisode?.id) {
+        val initialId = podcastState.activeEpisode?.id ?: return@LaunchedEffect
+        snapshotFlow { podcastState.activeEpisode?.isFinished }
+            .drop(1)
+            .collect { isFinished ->
+                if (isFinished == true && podcastNav == PodcastNavigation.EPISODE_DETAIL) {
+                    podcastNav = if (cameFromRecent) PodcastNavigation.DASHBOARD else PodcastNavigation.SHOW_DETAIL
+                }
+            }
+    }
 
     var isPlayerVisible by remember { 
         mutableStateOf(
@@ -224,6 +243,9 @@ fun PlayerScreen(
                     IconButton(onClick = { viewModel.launchClock() }) {
                         Icon(Icons.Default.AccessTime, contentDescription = "Open Clock")
                     }
+                    IconButton(onClick = { if (!viewModel.tryLaunchNativeApps()) showAppDrawer = true }) {
+                        Icon(Icons.Default.Apps, contentDescription = "Open Apps")
+                    }
                     if (currentDestination == NavigationDestination.PODCASTS && podcastNav == PodcastNavigation.SHOW_DETAIL) {
                         IconButton(onClick = { viewModel.markAllAsPlayed(selectedPodcastId) }) {
                             Icon(Icons.Default.DoneAll, "Mark all played")
@@ -235,6 +257,11 @@ fun PlayerScreen(
                     if (currentDestination == NavigationDestination.RADIO) {
                         IconButton(onClick = { showRadioSearch = true }) {
                             Icon(Icons.Default.Search, contentDescription = "Search Radio")
+                        }
+                    }
+                    if (currentDestination == NavigationDestination.PODCASTS && podcastNav == PodcastNavigation.DASHBOARD) {
+                        IconButton(onClick = { showPodcastSearch = true }) {
+                            Icon(Icons.Default.Search, contentDescription = "Search Podcasts")
                         }
                     }
                 },
@@ -433,13 +460,18 @@ fun PlayerScreen(
                                     channels = allChannels.filter { it.type == ChannelType.PODCAST },
                                     recentEpisodes = podcastState.recentEpisodes,
                                     activeView = podcastState.currentView,
+                                    isRefreshing = podcastState.isRefreshing,
+                                    refreshMessage = podcastState.refreshMessage,
+                                    showOnlyInProgress = appConfig.showOnlyInProgressPodcasts,
+                                    inProgressChannelIds = podcastState.inProgressChannelIds,
+                                    onRefresh = { viewModel.refreshAllPodcasts() },
+                                    onToggleInProgress = { viewModel.toggleInProgressFilter() },
                                     onChannelClick = { id -> selectedPodcastId = id; viewModel.selectChannel(id); podcastNav = PodcastNavigation.SHOW_DETAIL },
-                                    onEpisodeClick = { viewModel.setActiveEpisode(it); cameFromRecent = true; podcastNav = PodcastNavigation.EPISODE_DETAIL },
-                                    onPlayEpisode = { viewModel.playPodcastEpisode(it) },
+                                    onEpisodeClick = { viewModel.setActiveEpisode(it); cameFromRecent = true; podcastNav = PodcastNavigation.EPISODE_DETAIL; isPlayerVisible = false },
+                                    onPlayEpisode = { viewModel.playPodcastEpisode(it); cameFromRecent = true; podcastNav = PodcastNavigation.EPISODE_DETAIL; isPlayerVisible = false },
                                     onMarkPlayed = { viewModel.markEpisodeAsPlayed(it) },
                                     onSwitchView = { viewModel.setPodcastView(it) },
                                     onCreateChannel = { showAddPodcast = true },
-                                    onDownloadAllNew = { viewModel.downloadAllNew() },
                                     onDeleteChannel = { viewModel.deleteChannel(it) },
                                     onUrlUpdate = { id, url -> viewModel.setRadioUrl(id, url) },
                                     pendingMarkPlayed = pendingMarkPlayed,
@@ -451,8 +483,11 @@ fun PlayerScreen(
                             PodcastNavigation.SHOW_DETAIL -> {
                                 PodcastShowDetail(
                                     episodes = if (appConfig.hidePlayedEpisodes) podcastState.episodes.filter { !it.isFinished } else podcastState.episodes,
-                                    onEpisodeClick = { viewModel.setActiveEpisode(it); cameFromRecent = false; podcastNav = PodcastNavigation.EPISODE_DETAIL },
-                                    onPlayEpisode = { viewModel.playPodcastEpisode(it) },
+                                    isRefreshing = podcastState.isRefreshing,
+                                    refreshMessage = podcastState.refreshMessage,
+                                    onRefresh = { viewModel.refreshShow(selectedPodcastId) },
+                                    onEpisodeClick = { viewModel.setActiveEpisode(it); cameFromRecent = false; podcastNav = PodcastNavigation.EPISODE_DETAIL; isPlayerVisible = false },
+                                    onPlayEpisode = { viewModel.playPodcastEpisode(it); cameFromRecent = false; podcastNav = PodcastNavigation.EPISODE_DETAIL; isPlayerVisible = false },
                                     onDownload = { viewModel.downloadEpisode(it) },
                                     onDelete = { viewModel.deleteEpisodeFile(it) },
                                     onMarkPlayed = { viewModel.markAsPlayedWithUndo(it) },
@@ -464,7 +499,7 @@ fun PlayerScreen(
                                 podcastState.activeEpisode?.let { episode ->
                                     EpisodeDetailScreen(
                                         episode = episode,
-                                        isActive = currentMediaId == episode.id.toString(),
+                                        isActive = currentMediaId == episode.id.toString() || (isPlaying && appConfig.activePodcastEpisodeId == episode.id),
                                         isPlaying = isPlaying,
                                         playbackSpeed = playbackSpeed,
                                         currentPositionMs = podcastState.positionMs,
@@ -493,6 +528,7 @@ fun PlayerScreen(
         if (showAddPodcast) AddPodcastScreen(onSave = { url -> viewModel.createChannel("", ChannelType.PODCAST, url); showAddPodcast = false }, onDismiss = { showAddPodcast = false })
         if (showAddMusic) AddMusicDeckScreen(onSave = { name -> viewModel.createChannel(name, ChannelType.FOLDER); showAddMusic = false }, onDismiss = { showAddMusic = false })
         if (showRadioSearch) RadioSearchDialog(results = radioState.searchResults, onSearch = { viewModel.searchRadioStations(it) }, onSelect = { result -> viewModel.createChannel(result.name, ChannelType.RADIO, result.url); showRadioSearch = false }, onDismiss = { showRadioSearch = false })
+        if (showPodcastSearch) PodcastSearchDialog(results = podcastState.searchResults, onSearch = { viewModel.searchPodcasts(it) }, onSelect = { result -> viewModel.createChannel(result.collectionName, ChannelType.PODCAST, result.feedUrl); showPodcastSearch = false }, onDismiss = { showPodcastSearch = false })
         
         if (showBulkImport) BulkImportDialog(
             title = "Bulk Import Radio Stations",
@@ -506,6 +542,12 @@ fun PlayerScreen(
             onSave = { viewModel.bulkAddPodcasts(it); showBulkImportPodcasts = false },
             onFilePick = { importPodcastLauncher.launch(arrayOf("text/*", "application/*")); showBulkImportPodcasts = false },
             onDismiss = { showBulkImportPodcasts = false }
+        )
+
+        if (showAppDrawer) AppDrawerDialog(
+            apps = systemApps,
+            onLaunch = { viewModel.launchApp(it); showAppDrawer = false },
+            onDismiss = { showAppDrawer = false }
         )
     }
 }
@@ -633,10 +675,10 @@ fun RadioCard(channel: AudioChannel, isActive: Boolean, isPlaying: Boolean, stat
         }
     }
     if (showRenameDialog) {
-        AlertDialog(onDismissRequest = { showRenameDialog = false }, title = { Text("Rename Station") }, text = { OutlinedTextField(value = renameInput, onValueChange = { renameInput = it }, label = { Text("Station Name") }) }, confirmButton = { Button(onClick = { onRename(renameInput); showRenameDialog = false }) { Text("Save") } })
+        AlertDialog(onDismissRequest = { showRenameDialog = false }, title = { Text("Rename Station") }, text = { OutlinedTextField(value = renameInput, onValueChange = { renameInput = it }, label = { Text("Station Name") }) }, confirmButton = { Button(onClick = { onRename(renameInput); showRenameDialog = false }) { Text("Save") } }, dismissButton = { TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") } })
     }
     if (showUrlDialog) {
-        AlertDialog(onDismissRequest = { showUrlDialog = false }, title = { Text("Edit Stream URL") }, text = { OutlinedTextField(value = urlInput, onValueChange = { urlInput = it }, label = { Text("URL") }, modifier = Modifier.fillMaxWidth()) }, confirmButton = { Button(onClick = { onUrlUpdate(urlInput); showUrlDialog = false }) { Text("Save") } })
+        AlertDialog(onDismissRequest = { showUrlDialog = false }, title = { Text("Edit Stream URL") }, text = { OutlinedTextField(value = urlInput, onValueChange = { urlInput = it }, label = { Text("URL") }, modifier = Modifier.fillMaxWidth()) }, confirmButton = { Button(onClick = { onUrlUpdate(urlInput); showUrlDialog = false }) { Text("Save") } }, dismissButton = { TextButton(onClick = { showUrlDialog = false }) { Text("Cancel") } })
     }
 }
 
@@ -658,7 +700,7 @@ fun PodcastCard(channel: AudioChannel, onClick: () -> Unit, onDelete: () -> Unit
         }
     }
     if (showUrlDialog) {
-        AlertDialog(onDismissRequest = { showUrlDialog = false }, title = { Text("Edit RSS URL") }, text = { OutlinedTextField(value = urlInput, onValueChange = { urlInput = it }, label = { Text("URL") }, modifier = Modifier.fillMaxWidth()) }, confirmButton = { Button(onClick = { onUrlUpdate(urlInput); showUrlDialog = false }) { Text("Save") } })
+        AlertDialog(onDismissRequest = { showUrlDialog = false }, title = { Text("Edit RSS URL") }, text = { OutlinedTextField(value = urlInput, onValueChange = { urlInput = it }, label = { Text("URL") }, modifier = Modifier.fillMaxWidth()) }, confirmButton = { Button(onClick = { onUrlUpdate(urlInput); showUrlDialog = false }) { Text("Save") } }, dismissButton = { TextButton(onClick = { showUrlDialog = false }) { Text("Cancel") } })
     }
 }
 
@@ -675,6 +717,8 @@ fun AddPodcastScreen(onSave: (String) -> Unit, onDismiss: () -> Unit) {
             OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("RSS Feed URL") }, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(32.dp))
             Button(onClick = { onSave(url) }, modifier = Modifier.fillMaxWidth().height(56.dp), enabled = url.isNotBlank()) { Text("Subscribe") }
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Cancel") }
         }
     }
 }
@@ -695,6 +739,8 @@ fun AddChannelScreen(title: String, nameLabel: String, urlLabel: String, onSave:
             OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text(urlLabel) }, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(32.dp))
             Button(onClick = { onSave(name, url) }, modifier = Modifier.fillMaxWidth().height(56.dp), enabled = name.isNotBlank() && url.isNotBlank()) { Text("Save") }
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Cancel") }
         }
     }
 }
@@ -712,6 +758,8 @@ fun AddMusicDeckScreen(onSave: (String) -> Unit, onDismiss: () -> Unit) {
             OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Deck Name (e.g. Gym Mix)") }, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(32.dp))
             Button(onClick = { onSave(name) }, modifier = Modifier.fillMaxWidth().height(56.dp), enabled = name.isNotBlank()) { Text("Create Deck") }
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Cancel") }
         }
     }
 }
@@ -719,7 +767,11 @@ fun AddMusicDeckScreen(onSave: (String) -> Unit, onDismiss: () -> Unit) {
 @Composable
 fun RadioSearchDialog(results: List<com.michael.simplemusic.ui.RadioStationResult>, onSearch: (String) -> Unit, onSelect: (com.michael.simplemusic.ui.RadioStationResult) -> Unit, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss, confirmButton = {}, title = { Text("Search Global Radio") }, text = {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        title = { Text("Search Global Radio") },
+        text = {
         Column {
             OutlinedTextField(value = query, onValueChange = { query = it; onSearch(it) }, label = { Text("Search...") }, modifier = Modifier.fillMaxWidth(), trailingIcon = { Icon(Icons.Default.Search, null) })
             Spacer(Modifier.height(8.dp))
@@ -819,8 +871,31 @@ fun AddButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) 
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PodcastDashboard(channels: List<AudioChannel>, recentEpisodes: List<com.michael.simplemusic.data.PodcastEpisode>, activeView: String, onChannelClick: (Int) -> Unit, onEpisodeClick: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onPlayEpisode: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onSwitchView: (String) -> Unit, onCreateChannel: () -> Unit, onDownloadAllNew: () -> Unit, onDeleteChannel: (Int) -> Unit, onUrlUpdate: (Int, String) -> Unit, pendingMarkPlayed: Set<Int>, onSwipeMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onUndoMarkPlayed: (Int) -> Unit, onBulkImport: () -> Unit) {
+fun PodcastDashboard(
+    channels: List<AudioChannel>,
+    recentEpisodes: List<com.michael.simplemusic.data.PodcastEpisode>,
+    activeView: String,
+    isRefreshing: Boolean,
+    refreshMessage: String?,
+    showOnlyInProgress: Boolean,
+    inProgressChannelIds: List<Int>,
+    onRefresh: () -> Unit,
+    onToggleInProgress: () -> Unit,
+    onChannelClick: (Int) -> Unit,
+    onEpisodeClick: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
+    onPlayEpisode: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
+    onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
+    onSwitchView: (String) -> Unit,
+    onCreateChannel: () -> Unit,
+    onDeleteChannel: (Int) -> Unit,
+    onUrlUpdate: (Int, String) -> Unit,
+    pendingMarkPlayed: Set<Int>,
+    onSwipeMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
+    onUndoMarkPlayed: (Int) -> Unit,
+    onBulkImport: () -> Unit
+) {
     Column(modifier = Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = if (activeView == "SHOWS") 0 else 1) {
             Tab(selected = activeView == "SHOWS", onClick = { onSwitchView("SHOWS") }, text = { Text("Shows") })
@@ -828,65 +903,120 @@ fun PodcastDashboard(channels: List<AudioChannel>, recentEpisodes: List<com.mich
         }
         
         if (activeView == "SHOWS") {
-            if (channels.isEmpty()) EmptyState("No podcasts yet", Icons.Default.Podcasts, onCreateChannel)
-            else LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(channels) { channel ->
-                    PodcastCard(
-                        channel = channel,
-                        onClick = { onChannelClick(channel.id) },
-                        onDelete = { onDeleteChannel(channel.id) },
-                        onUrlUpdate = { newUrl -> onUrlUpdate(channel.id, newUrl) }
-                    )
-                }
-                item {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AddButton("Subscribe to RSS", onCreateChannel, modifier = Modifier.weight(1f))
-                        OutlinedButton(onClick = onBulkImport, modifier = Modifier.weight(1f).height(80.dp)) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.CloudUpload, null)
-                                Text("Bulk Import", style = MaterialTheme.typography.labelSmall)
+            val displayChannels = if (showOnlyInProgress) {
+                channels.filter { it.id in inProgressChannelIds }
+            } else channels
+
+            Column(modifier = Modifier.fillMaxSize()) {
+                FilterChip(
+                    selected = showOnlyInProgress,
+                    onClick = onToggleInProgress,
+                    label = { Text("In Progress") },
+                    leadingIcon = { if (showOnlyInProgress) Icon(Icons.Default.Check, null, modifier = Modifier.size(FilterChipDefaults.IconSize)) },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+
+                if (displayChannels.isEmpty()) {
+                    if (showOnlyInProgress && channels.isNotEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("No shows in progress", color = MaterialTheme.colorScheme.outline)
+                        }
+                    } else {
+                        EmptyState("No podcasts yet", Icons.Default.Podcasts, onCreateChannel)
+                    }
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(displayChannels) { channel ->
+                            PodcastCard(
+                                channel = channel,
+                                onClick = { onChannelClick(channel.id) },
+                                onDelete = { onDeleteChannel(channel.id) },
+                                onUrlUpdate = { newUrl -> onUrlUpdate(channel.id, newUrl) }
+                            )
+                        }
+                        item {
+                            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                AddButton("Subscribe to RSS", onCreateChannel, modifier = Modifier.weight(1f))
+                                OutlinedButton(onClick = onBulkImport, modifier = Modifier.weight(1f).height(80.dp)) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(Icons.Default.CloudUpload, null)
+                                        Text("Bulk Import", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
         } else {
-            if (recentEpisodes.isEmpty()) Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { 
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("No recent episodes", color = MaterialTheme.colorScheme.outline)
-                    Spacer(Modifier.height(16.dp))
-                    Button(onClick = onDownloadAllNew) { Text("Download All New") }
-                }
-            }
-            else LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                item {
-                    Button(onClick = onDownloadAllNew, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                        Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text("Download New (Last 2 Weeks)")
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = onRefresh,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    refreshMessage?.let {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = MaterialTheme.shapes.small
+                        ) {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(8.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
-                }
-                items(recentEpisodes, key = { it.id }) { episode ->
-                    if (episode.id in pendingMarkPlayed) {
-                        UndoItem(episode.title, onUndo = { onUndoMarkPlayed(episode.id) })
-                    } else {
-                        EpisodeListItem(
-                            episode = episode,
-                            onClick = { onEpisodeClick(episode) },
-                            onPlay = { onPlayEpisode(episode) },
-                            onDownload = {},
-                            onDelete = {},
-                            onSwipe = { onSwipeMarkPlayed(episode) },
-                            isPending = false,
-                            onUndo = {}
-                        )
+                if (recentEpisodes.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { 
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("No recent episodes", color = MaterialTheme.colorScheme.outline)
+                            Text("Pull down to refresh", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                        }
+                    }
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(recentEpisodes, key = { it.id }) { episode ->
+                            if (episode.id in pendingMarkPlayed) {
+                                UndoItem(episode.title, onUndo = { onUndoMarkPlayed(episode.id) })
+                            } else {
+                                EpisodeListItem(
+                                    episode = episode,
+                                    onClick = { onEpisodeClick(episode) },
+                                    onPlay = { onPlayEpisode(episode) },
+                                    onDownload = {},
+                                    onDelete = {},
+                                    onSwipe = { onSwipeMarkPlayed(episode) },
+                                    isPending = false,
+                                    onUndo = {}
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
     }
 }
+}
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PodcastShowDetail(episodes: List<com.michael.simplemusic.data.PodcastEpisode>, onEpisodeClick: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onPlayEpisode: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onDownload: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onDelete: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit, pendingMarkPlayed: Set<Int>, onUndoMarkPlayed: (Int) -> Unit) {
+fun PodcastShowDetail(
+    episodes: List<com.michael.simplemusic.data.PodcastEpisode>,
+    isRefreshing: Boolean,
+    refreshMessage: String?,
+    onRefresh: () -> Unit,
+    onEpisodeClick: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
+    onPlayEpisode: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
+    onDownload: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
+    onDelete: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
+    onMarkPlayed: (com.michael.simplemusic.data.PodcastEpisode) -> Unit,
+    pendingMarkPlayed: Set<Int>,
+    onUndoMarkPlayed: (Int) -> Unit
+) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
     
     val filteredEpisodes = remember(searchQuery, episodes) {
@@ -904,25 +1034,47 @@ fun PodcastShowDetail(episodes: List<com.michael.simplemusic.data.PodcastEpisode
             singleLine = true
         )
         
-        LazyColumn(modifier = Modifier.weight(1f)) {
-            items(filteredEpisodes, key = { it.id }) { episode ->
-                if (episode.id in pendingMarkPlayed) {
-                    UndoItem(episode.title, onUndo = { onUndoMarkPlayed(episode.id) })
-                } else {
-                    EpisodeListItem(
-                        episode = episode,
-                        onClick = { onEpisodeClick(episode) },
-                        onPlay = { onPlayEpisode(episode) },
-                        onDownload = { onDownload(episode) },
-                        onDelete = { onDelete(episode) },
-                        onSwipe = { onMarkPlayed(episode) },
-                        isPending = false,
-                        onUndo = {}
-                    )
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = onRefresh,
+            modifier = Modifier.weight(1f)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                refreshMessage?.let {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = MaterialTheme.shapes.small
+                    ) {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(8.dp),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(filteredEpisodes, key = { it.id }) { episode ->
+                    if (episode.id in pendingMarkPlayed) {
+                        UndoItem(episode.title, onUndo = { onUndoMarkPlayed(episode.id) })
+                    } else {
+                        EpisodeListItem(
+                            episode = episode,
+                            onClick = { onEpisodeClick(episode) },
+                            onPlay = { onPlayEpisode(episode) },
+                            onDownload = { onDownload(episode) },
+                            onDelete = { onDelete(episode) },
+                            onSwipe = { onMarkPlayed(episode) },
+                            isPending = false,
+                            onUndo = {}
+                        )
+                    }
                 }
             }
         }
     }
+}
 }
 
 @Composable
@@ -1169,5 +1321,102 @@ fun HtmlText(html: String, modifier: Modifier = Modifier) {
             }
         },
         update = { it.text = Html.fromHtml(html, Html.FROM_HTML_MODE_COMPACT) }
+    )
+}
+
+@Composable
+fun PodcastSearchDialog(
+    results: List<com.michael.simplemusic.podcast.PodcastSearchResult>,
+    onSearch: (String) -> Unit,
+    onSelect: (com.michael.simplemusic.podcast.PodcastSearchResult) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        title = { Text("Search Podcasts") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it; onSearch(it) },
+                    label = { Text("Search...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = { Icon(Icons.Default.Search, null) },
+                    singleLine = true
+                )
+                Spacer(Modifier.height(8.dp))
+                LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
+                    items(results) { result ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelect(result) }
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AsyncImage(
+                                model = result.artworkUrl,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(Color.LightGray)
+                            )
+                            Column(modifier = Modifier.padding(start = 12.dp)) {
+                                Text(result.collectionName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
+                                Text(result.artistName, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        HorizontalDivider()
+                    }
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun AppDrawerDialog(
+    apps: List<com.michael.simplemusic.ui.AppInfo>,
+    onLaunch: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        title = { Text("Installed Apps") },
+        text = {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(80.dp),
+                modifier = Modifier.heightIn(max = 500.dp),
+                contentPadding = PaddingValues(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                items(apps) { app ->
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onLaunch(app.packageName) }
+                    ) {
+                        AsyncImage(
+                            model = app.icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Text(
+                            text = app.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
     )
 }

@@ -50,9 +50,9 @@ Subscribe to your favorite shows and listen offline.
 ### Subscribing
 1.  Navigate to the **Podcasts** tab.
 2.  Ensure you are on the **Shows** tab.
-3.  Tap **Subscribe to RSS**.
-4.  Paste the RSS feed URL and tap **Subscribe**.
-5.  Alternatively, use **Bulk Import** to add multiple RSS URLs at once from a list or text file.
+3.  Tap the **Search (Magnifying Glass)** icon in the top bar to search for any podcast by name.
+4.  Alternatively, tap **Subscribe to RSS** to manually paste a feed URL.
+5.  Use **Bulk Import** to add multiple RSS URLs at once from a list or text file.
 
 ### Managing Episodes
 - **Shows View:** See all your subscribed podcasts. Tap one to see its full episode list.
@@ -85,5 +85,7 @@ Total Audio Hub can act as your device's primary interface, turning a tablet or 
 
 ### Using Hub Mode
 - **Stay Focused:** Pressing the physical or virtual Home button will now always bring you back to your audio controls.
-- **System Access:** A dedicated **Clock** button is available in the top bar to quickly jump to your system alarms and time settings.
+- **System Access:** 
+    - A **Clock** icon in the top bar jumps to your system alarms and time settings.
+    - An **Apps** icon (grid) in the top bar opens an **App Drawer**, allowing you to launch any other installed app on your device without leaving Hub Mode.
 - **Edge-to-Edge:** The app automatically uses every pixel of your screen for a clean, immersive look.

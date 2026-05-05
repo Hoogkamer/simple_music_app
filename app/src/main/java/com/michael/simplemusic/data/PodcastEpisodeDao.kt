@@ -43,4 +43,12 @@ interface PodcastEpisodeDao {
  
     @Query("SELECT COUNT(*) FROM podcast_episodes WHERE downloadStatus = 2")
     suspend fun getActiveDownloadCount(): Int
+    @Query("SELECT DISTINCT channelId FROM podcast_episodes WHERE isFinished = 0 AND playbackPositionMs >= 10000")
+    fun getInProgressChannelIds(): Flow<List<Int>>
+
+    @Query("SELECT COUNT(*) FROM podcast_episodes WHERE isFinished = 0 AND downloadStatus != 3 AND pubDate >= :threshold")
+    suspend fun getPendingDownloadCount(threshold: Long): Int
+
+    @Query("SELECT COUNT(*) FROM podcast_episodes WHERE downloadStatus = 3 AND pubDate >= :threshold")
+    suspend fun getDownloadedCount(threshold: Long): Int
 }

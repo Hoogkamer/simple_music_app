@@ -10,17 +10,17 @@ import java.util.*
 class PodcastParser {
     private val dateFormat = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss Z", Locale.US)
 
-    fun parse(inputStream: InputStream, channelId: Int): Pair<String, List<PodcastEpisode>> {
+    fun parse(inputStream: InputStream, channelId: Int, sinceDate: Long? = null): Pair<String, List<PodcastEpisode>> {
         inputStream.use {
             val parser = Xml.newPullParser()
             parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
             parser.setInput(it, null)
             parser.nextTag()
-            return readFeed(parser, channelId)
+            return readFeed(parser, channelId, sinceDate)
         }
     }
 
-    private fun readFeed(parser: XmlPullParser, channelId: Int): Pair<String, List<PodcastEpisode>> {
+    private fun readFeed(parser: XmlPullParser, channelId: Int, sinceDate: Long?): Pair<String, List<PodcastEpisode>> {
         var title = ""
         var episodes = listOf<PodcastEpisode>()
 
@@ -28,7 +28,7 @@ class PodcastParser {
         while (parser.next() != XmlPullParser.END_TAG) {
             if (parser.eventType != XmlPullParser.START_TAG) continue
             if (parser.name == "channel") {
-                val result = readChannel(parser, channelId)
+                val result = readChannel(parser, channelId, sinceDate)
                 title = result.first
                 episodes = result.second
             } else {
@@ -38,15 +38,27 @@ class PodcastParser {
         return Pair(title, episodes)
     }
 
-    private fun readChannel(parser: XmlPullParser, channelId: Int): Pair<String, List<PodcastEpisode>> {
+    private fun readChannel(parser: XmlPullParser, channelId: Int, sinceDate: Long?): Pair<String, List<PodcastEpisode>> {
         val episodes = mutableListOf<PodcastEpisode>()
         var podcastTitle = ""
+        var stopParsing = false
         while (parser.next() != XmlPullParser.END_TAG) {
             if (parser.eventType != XmlPullParser.START_TAG) continue
             when (parser.name) {
                 "title" -> podcastTitle = readText(parser)
                 "item" -> {
-                    readEpisode(parser, channelId, podcastTitle)?.let { episodes.add(it) }
+                    if (!stopParsing) {
+                        val episode = readEpisode(parser, channelId, podcastTitle)
+                        if (episode != null) {
+                            if (sinceDate != null && (episode.pubDate ?: 0L) < sinceDate) {
+                                stopParsing = true
+                            } else {
+                                episodes.add(episode)
+                            }
+                        }
+                    } else {
+                        skip(parser)
+                    }
                 }
                 else -> skip(parser)
             }
@@ -60,6 +72,7 @@ class PodcastParser {
         var streamUrl = ""
         var pubDate: Long? = null
         var guid = ""
+        var durationMs = 0L
 
         while (parser.next() != XmlPullParser.END_TAG) {
             if (parser.eventType != XmlPullParser.START_TAG) continue
@@ -76,6 +89,10 @@ class PodcastParser {
                     pubDate = try { dateFormat.parse(dateStr)?.time } catch (e: Exception) { null }
                 }
                 "guid" -> guid = readText(parser)
+                "itunes:duration" -> {
+                    val durationStr = readText(parser)
+                    durationMs = parseDuration(durationStr)
+                }
                 else -> skip(parser)
             }
         }
@@ -90,8 +107,34 @@ class PodcastParser {
             streamUrl = streamUrl,
             pubDate = pubDate,
             guid = guid,
-            podcastTitle = podcastTitle
+            podcastTitle = podcastTitle,
+            durationMs = durationMs
         )
+    }
+
+    private fun parseDuration(duration: String): Long {
+        return try {
+            val parts = duration.split(":")
+            when (parts.size) {
+                3 -> { // HH:MM:SS
+                    val h = parts[0].toLong()
+                    val m = parts[1].toLong()
+                    val s = parts[2].toLong()
+                    (h * 3600 + m * 60 + s) * 1000
+                }
+                2 -> { // MM:SS
+                    val m = parts[0].toLong()
+                    val s = parts[1].toLong()
+                    (m * 60 + s) * 1000
+                }
+                1 -> { // SS or total seconds
+                    parts[0].toLong() * 1000
+                }
+                else -> 0L
+            }
+        } catch (e: Exception) {
+            0L
+        }
     }
 
     private fun readText(parser: XmlPullParser): String {

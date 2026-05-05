@@ -2,7 +2,14 @@ package com.michael.simplemusic.ui
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.Drawable
 import android.provider.AlarmClock
+
+data class AppInfo(
+    val label: String,
+    val packageName: String,
+    val icon: Drawable?
+)
 
 object SystemApps {
     fun launchClock(context: Context) {
@@ -24,6 +31,43 @@ object SystemApps {
                     context.startActivity(launchIntent)
                 }
             }
+        }
+    }
+
+    fun getInstalledApps(context: Context): List<AppInfo> {
+        val pm = context.packageManager
+        val myPackage = context.packageName
+        val mainIntent = Intent(Intent.ACTION_MAIN, null)
+        mainIntent.addCategory(Intent.CATEGORY_LAUNCHER)
+        
+        val resolveInfos = pm.queryIntentActivities(mainIntent, 0)
+        return resolveInfos.mapNotNull {
+            if (it.activityInfo.packageName == myPackage) return@mapNotNull null
+            
+            AppInfo(
+                label = it.loadLabel(pm).toString(),
+                packageName = it.activityInfo.packageName,
+                icon = it.loadIcon(pm)
+            )
+        }.distinctBy { it.packageName }.sortedBy { it.label.lowercase() }
+    }
+
+    fun launchApp(context: Context, packageName: String) {
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
+        if (launchIntent != null) {
+            launchIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            context.startActivity(launchIntent)
+        }
+    }
+
+    fun launchSystemAllApps(context: Context): Boolean {
+        val intent = Intent("android.intent.action.ALL_APPS")
+        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        return try {
+            context.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            false
         }
     }
 }

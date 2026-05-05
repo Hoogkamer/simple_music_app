@@ -11,5 +11,6 @@ data class AppConfig(
     val activePodcastChannelId: Int? = null,
     val activePodcastEpisodeId: Int? = null,
     val lastCategory: String = "CHANNELS",
-    val hidePlayedEpisodes: Boolean = false
+    val hidePlayedEpisodes: Boolean = false,
+    val showOnlyInProgressPodcasts: Boolean = false
 )

@@ -23,6 +23,7 @@ import com.michael.simplemusic.service.MusicService
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.net.URL
+import java.net.HttpURLConnection
 import java.net.URLEncoder
 
 data class RadioStationResult(
@@ -62,7 +63,11 @@ data class PodcastState(
     val currentTrackArtist: String? = null,
     val positionMs: Long = 0,
     val durationMs: Long = 0,
-    val isPlayingActiveEpisode: Boolean = false
+    val isPlayingActiveEpisode: Boolean = false,
+    val isRefreshing: Boolean = false,
+    val refreshMessage: String? = null,
+    val inProgressChannelIds: List<Int> = emptyList(),
+    val searchResults: List<com.michael.simplemusic.podcast.PodcastSearchResult> = emptyList()
 )
 
 class PlayerViewModel(application: Application) : AndroidViewModel(application) {
@@ -78,6 +83,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private var mediaController: MediaController? = null
     private var playerLoadJob: Job? = null
     private var podcastEpisodesJob: Job? = null
+    private var activeEpisodeJob: Job? = null
     private var isRefreshing = false
 
     // --- Unified Category States ---
@@ -108,10 +114,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val _currentMediaId = MutableStateFlow<String?>(null)
     val currentMediaId: StateFlow<String?> = _currentMediaId.asStateFlow()
 
+    private val _systemApps = MutableStateFlow<List<AppInfo>>(emptyList())
+    val systemApps: StateFlow<List<AppInfo>> = _systemApps.asStateFlow()
+
     val allChannels: StateFlow<List<AudioChannel>>
 
     init {
         viewModelScope.launch { podcastRepository.clearDownloadingState() }
+        _systemApps.value = SystemApps.getInstalledApps(application)
         allChannels = repository.allChannels
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -120,9 +130,15 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             _podcastState.update { it.copy(recentEpisodes = episodes) }
         }.launchIn(viewModelScope)
 
+        // Sync in-progress channel IDs
+        podcastRepository.getInProgressChannelIds().onEach { ids ->
+            _podcastState.update { it.copy(inProgressChannelIds = ids) }
+        }.launchIn(viewModelScope)
+
         viewModelScope.launch {
             val channels = allChannels.first { it.isNotEmpty() }
-            podcastRepository.refreshAllFeeds(channels)
+            val twoWeeksAgo = System.currentTimeMillis() - (14L * 24 * 3600 * 1000)
+            podcastRepository.refreshAllFeeds(channels, sinceDate = twoWeeksAgo)
         }
 
         viewModelScope.launch {
@@ -137,8 +153,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 _radioState.update { it.copy(activeChannel = radioChannel) }
 
                 val podcastChannel = actualConfig.activePodcastChannelId?.let { repository.getChannelById(it) }
-                val podcastEpisode = actualConfig.activePodcastEpisodeId?.let { podcastRepository.getEpisodeById(it) }
-                _podcastState.update { it.copy(activeChannel = podcastChannel, activeEpisode = podcastEpisode) }
+                _podcastState.update { it.copy(activeChannel = podcastChannel) }
+                observeActiveEpisode(actualConfig.activePodcastEpisodeId)
             }
         }
 
@@ -238,6 +254,13 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                         if (cat == "MUSIC") _musicState.update { it.copy(durationMs = dur) }
                         if (cat == "PODCASTS") _podcastState.update { it.copy(durationMs = dur) }
                         updateCurrentTrackInfo()
+                    }
+                }
+                Player.STATE_ENDED -> {
+                    if (_appConfig.value.lastCategory == "PODCASTS") {
+                        _podcastState.value.activeEpisode?.let { episode ->
+                            markEpisodeAsPlayed(episode)
+                        }
                     }
                 }
                 else -> {}
@@ -524,7 +547,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             val initialName = if (type == ChannelType.PODCAST || (type == ChannelType.RADIO && name.isBlank())) "Loading..." else name
             val id = repository.insertChannel(AudioChannel(name = initialName, type = type, streamUrl = streamUrl))
             if (type == ChannelType.PODCAST && streamUrl != null) {
-                val title = podcastRepository.refreshFeed(id.toInt(), streamUrl)
+                val (title, _) = podcastRepository.refreshFeed(id.toInt(), streamUrl)
                 if (!title.isNullOrBlank()) {
                     repository.updateChannel(repository.getChannelById(id.toInt())?.copy(name = title) ?: return@launch)
                 }
@@ -563,7 +586,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             val channel = repository.getChannelById(channelId) ?: return@launch
             repository.updateChannel(channel.copy(streamUrl = url))
             if (channel.type == ChannelType.PODCAST) {
-                val title = podcastRepository.refreshFeed(channelId, url)
+                val (title, _) = podcastRepository.refreshFeed(channelId, url)
                 if (!title.isNullOrBlank()) {
                     repository.updateChannel(repository.getChannelById(channelId)?.copy(name = title) ?: return@launch)
                 }
@@ -600,6 +623,13 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun searchPodcasts(query: String) {
+        viewModelScope.launch {
+            val results = com.michael.simplemusic.podcast.PodcastSearchClient.searchPodcasts(query)
+            _podcastState.update { it.copy(searchResults = results) }
+        }
+    }
+
     fun bulkAddRadioStations(urlsText: String) {
         viewModelScope.launch {
             val existingUrls = allChannels.value.filter { it.type == ChannelType.RADIO }.mapNotNull { it.streamUrl }.toSet()
@@ -624,7 +654,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             
             newUrls.forEach { url ->
                 val id = repository.insertChannel(AudioChannel(name = "Loading...", type = ChannelType.PODCAST, streamUrl = url))
-                val title = podcastRepository.refreshFeed(id.toInt(), url)
+                val (title, _) = podcastRepository.refreshFeed(id.toInt(), url)
                 if (!title.isNullOrBlank()) {
                     repository.updateChannel(repository.getChannelById(id.toInt())?.copy(name = title) ?: return@forEach)
                 }
@@ -676,8 +706,20 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setActiveEpisode(episode: PodcastEpisode?) {
-        _podcastState.update { it.copy(activeEpisode = episode) }
+        observeActiveEpisode(episode?.id)
         updateConfig { it.copy(activePodcastEpisodeId = episode?.id) }
+    }
+
+    private fun observeActiveEpisode(id: Int?) {
+        activeEpisodeJob?.cancel()
+        if (id == null) {
+            _podcastState.update { it.copy(activeEpisode = null) }
+            return
+        }
+        activeEpisodeJob = podcastRepository.getEpisodeFlowById(id)
+            .onEach { episode ->
+                _podcastState.update { it.copy(activeEpisode = episode) }
+            }.launchIn(viewModelScope)
     }
 
     fun playPodcastEpisode(episode: PodcastEpisode) {
@@ -702,6 +744,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     durationMs = episode.durationMs,
                     isPlayingActiveEpisode = true
                 ) }
+                _isPlaying.value = true
 
                 // 3. Load into ExoPlayer
                 mediaController?.let { controller ->
@@ -762,8 +805,89 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun refreshAllPodcasts() {
+        viewModelScope.launch {
+            try {
+                _podcastState.update { it.copy(isRefreshing = true, refreshMessage = "Refreshing feeds...") }
+                val twoWeeksAgo = System.currentTimeMillis() - (14L * 24 * 3600 * 1000)
+                val newCount = podcastRepository.refreshAllFeeds(allChannels.value, sinceDate = twoWeeksAgo) { completed, total ->
+                    _podcastState.update { it.copy(refreshMessage = "Refreshing feeds ($completed/$total)...") }
+                }
+                
+                _podcastState.update { it.copy(refreshMessage = "Found $newCount new episodes. Starting downloads...") }
+                podcastRepository.downloadAllNew()
+
+                // Monitor download progress (max 2 minutes)
+                var iterations = 0
+                while (iterations < 60) {
+                    val (pending, downloaded) = podcastRepository.getDownloadProgress()
+                    val total = pending + downloaded
+                    if (total > 0) {
+                        _podcastState.update { it.copy(refreshMessage = "Found $newCount new episodes. Downloading $downloaded/$total...") }
+                    }
+                    if (pending == 0) break
+                    delay(2000)
+                    iterations++
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _podcastState.update { it.copy(isRefreshing = false, refreshMessage = null) }
+            }
+        }
+    }
+
+    fun refreshShow(channelId: Int) {
+        viewModelScope.launch {
+            try {
+                val channel = repository.getChannelById(channelId) ?: return@launch
+                if (channel.type != ChannelType.PODCAST || channel.streamUrl == null) return@launch
+                
+                _podcastState.update { it.copy(isRefreshing = true, refreshMessage = "Refreshing ${channel.name}...") }
+                val (_, newCount) = podcastRepository.refreshFeed(channelId, channel.streamUrl)
+                
+                if (newCount > 0) {
+                    _podcastState.update { it.copy(refreshMessage = "Found $newCount new episodes. Starting downloads...") }
+                    podcastRepository.downloadAllNew()
+                    
+                    // Monitor download progress (max 2 minutes)
+                    var iterations = 0
+                    while (iterations < 60) {
+                        val (pending, downloaded) = podcastRepository.getDownloadProgress()
+                        val total = pending + downloaded
+                        if (total > 0) {
+                            _podcastState.update { it.copy(refreshMessage = "Found $newCount new. Downloading $downloaded/$total...") }
+                        }
+                        if (pending == 0) break
+                        delay(2000)
+                        iterations++
+                    }
+                } else {
+                    _podcastState.update { it.copy(refreshMessage = "No new episodes found.") }
+                    delay(1500)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _podcastState.update { it.copy(isRefreshing = false, refreshMessage = null) }
+            }
+        }
+    }
+
+    fun toggleInProgressFilter() {
+        updateConfig { it.copy(showOnlyInProgressPodcasts = !it.showOnlyInProgressPodcasts) }
+    }
+
     fun launchClock() {
         SystemApps.launchClock(app)
+    }
+
+    fun tryLaunchNativeApps(): Boolean {
+        return SystemApps.launchSystemAllApps(app)
+    }
+
+    fun launchApp(packageName: String) {
+        SystemApps.launchApp(app, packageName)
     }
 
     override fun onCleared() {

@@ -8,7 +8,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [AudioChannel::class, PodcastEpisode::class, AppConfig::class], version = 14, exportSchema = false)
+@Database(entities = [AudioChannel::class, PodcastEpisode::class, AppConfig::class], version = 15, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun audioChannelDao(): AudioChannelDao
@@ -32,6 +32,12 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE app_config ADD COLUMN showOnlyInProgressPodcasts INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -39,7 +45,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "simple_music_db"
                 )
-                .addMigrations(MIGRATION_12_13, MIGRATION_13_14)
+                .addMigrations(MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance

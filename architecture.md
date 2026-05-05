@@ -108,7 +108,9 @@ Manages individual episodes for the Podcast module.
 
 **App Startup & Hub Mode:** On cold launch, the app restores the last active module and channel from persistence, preparing playback at the last known position. 
 - **Launcher Mode:** The app is configured with `CATEGORY_HOME`, allowing it to serve as the device's default launcher for dedicated hardware setups.
-- **System Integration:** Includes a utility to launch the system Clock/Alarm app directly from the hub interface.
+- **System Integration:** 
+    - Includes a utility to launch the system Clock/Alarm app directly.
+    - Features a built-in **App Drawer** to discover and launch other installed applications, ensuring full device usability while in Launcher Mode.
 
 ### Music Module (Decks)
 
@@ -140,10 +142,12 @@ Manages complex states for multiple subscriptions and individual episode progres
 *   **Background Refresh:** All podcast feeds are refreshed on app launch to fetch new episodes.
 *   **Shows Tab:** Displays subscribed Podcasts.
     *   **Interaction:** Short-press leads to the Episode List.
+    *   **Filtering:** Includes an "In Progress" filter chip to quickly show only podcasts that have episodes currently being listened to (at least 10 seconds of progress).
+    *   **Global Search:** Integrates with the iTunes Search API to search and subscribe to podcasts by name.
     *   **Bulk Import:** Allows adding multiple RSS feed URLs at once via clipboard or text file.
-    *   **Episode List:** Shows episodes ordered by publication date (newest first). Includes a search filter for titles and descriptions.
+    *   **Episode List:** Shows episodes ordered by publication date (newest first). Includes a search filter for titles and descriptions. Pull down to refresh the specific show's feed.
     *   **Bulk Actions:** "Hide Played" toggles visibility of finished episodes. "Mark All Played" marks all episodes as finished, **excluding those that are downloaded, downloading, or queued** (to prevent accidental deletion of offline content).
-*   **Recent Tab:** A chronological feed of episodes from all subscriptions (last 14 days). Includes a "Download All" button for unplayed episodes within that window.
+*   **Recent Tab:** A chronological feed of episodes from all subscriptions (last 14 days). Pull down to refresh all feeds and fetch new episodes.
 *   **Episode List Item:** Shows a circular progress ring (indicating remaining time), show name, title, and metadata (download status, publication date).
     *   **Interaction:** Swipe left/right to mark as played (with a 5-second undo window); tap Play icon for immediate playback; tap title for details.
 *   **Episode Details Page:** Features a playback slider (with skip back 15s / forward 30s), show notes (HTML rendered), and context-aware actions (Download/Stream, Mark Played/Unplayed toggle). Also includes a **Playback Speed** toggle (0.5x to 2.0x).
