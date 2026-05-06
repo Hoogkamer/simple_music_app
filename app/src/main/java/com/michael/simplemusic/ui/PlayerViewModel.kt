@@ -260,6 +260,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                     if (_appConfig.value.lastCategory == "PODCASTS") {
                         _podcastState.value.activeEpisode?.let { episode ->
                             markEpisodeAsPlayed(episode)
+                            // Clear active episode and channel to hide mini player and UI detail
+                            setActiveEpisode(null)
+                            _activeChannelId.value = null
+                            updateConfig { it.copy(activePodcastChannelId = null) }
                         }
                     }
                 }
@@ -706,6 +710,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setActiveEpisode(episode: PodcastEpisode?) {
+        if (episode != null) {
+            _podcastState.update { it.copy(activeEpisode = episode) }
+        }
         observeActiveEpisode(episode?.id)
         updateConfig { it.copy(activePodcastEpisodeId = episode?.id) }
     }
@@ -713,7 +720,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private fun observeActiveEpisode(id: Int?) {
         activeEpisodeJob?.cancel()
         if (id == null) {
-            _podcastState.update { it.copy(activeEpisode = null) }
+            _podcastState.update { it.copy(
+                activeEpisode = null,
+                currentTrackName = "",
+                currentTrackArtist = null,
+                positionMs = 0,
+                durationMs = 0,
+                isPlayingActiveEpisode = false
+            ) }
             return
         }
         activeEpisodeJob = podcastRepository.getEpisodeFlowById(id)
@@ -723,6 +737,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun playPodcastEpisode(episode: PodcastEpisode) {
+        setActiveEpisode(episode)
         playerLoadJob?.cancel()
         playerLoadJob = viewModelScope.launch {
             val channel = repository.getChannelById(episode.channelId) ?: return@launch
@@ -731,7 +746,6 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 // 1. Update State to point to this Podcast Channel
                 _activeChannelId.value = episode.channelId
-                setActiveEpisode(episode)
                 
                 updateConfig { it.copy(
                     activePodcastChannelId = episode.channelId,
@@ -750,6 +764,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
                 mediaController?.let { controller ->
                     controller.stop()
                     controller.clearMediaItems()
+                    controller.repeatMode = Player.REPEAT_MODE_OFF
                     val uri = episode.localPath ?: episode.streamUrl
                     val item = MediaItem.Builder()
                         .setMediaId(episode.id.toString())

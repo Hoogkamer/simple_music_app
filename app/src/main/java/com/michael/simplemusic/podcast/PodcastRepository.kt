@@ -114,8 +114,8 @@ class PodcastRepository(private val context: android.content.Context, private va
         withContext(Dispatchers.IO) {
             var isFinished = false
             
-            // Auto-finish if < 30 seconds remaining
-            if (durationMs > 0 && (durationMs - positionMs) < 30000) {
+            // Auto-finish if < 2 seconds remaining
+            if (durationMs > 0 && (durationMs - positionMs) < 2000) {
                 isFinished = true
             }
 
