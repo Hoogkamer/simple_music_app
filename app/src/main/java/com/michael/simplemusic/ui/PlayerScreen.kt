@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -83,6 +84,7 @@ fun PlayerScreen(
     var showRadioSearch by remember { mutableStateOf(false) }
     var showPodcastSearch by remember { mutableStateOf(false) }
     var showAppDrawer by remember { mutableStateOf(false) }
+    var showFileBrowser by remember { mutableStateOf(false) }
     val pendingMarkPlayed by viewModel.pendingMarkPlayed.collectAsStateWithLifecycle()
     
     var currentDestination by remember { 
@@ -223,7 +225,7 @@ fun PlayerScreen(
                         IconButton(onClick = { isPlayerVisible = false }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
-                    } else if (currentDestination == NavigationDestination.PODCASTS && podcastNav != PodcastNavigation.DASHBOARD) {
+                    } else if (currentDestination == NavigationDestination.PODCASTS && (podcastNav != PodcastNavigation.DASHBOARD || isPlayerVisible)) {
                         IconButton(onClick = { 
                             if (isPlayerVisible) {
                                 isPlayerVisible = false
@@ -415,6 +417,11 @@ fun PlayerScreen(
                         onNext = { if (activeChannelId == musicState.activeChannel?.id) viewModel.next() },
                         onPrevious = { if (activeChannelId == musicState.activeChannel?.id) viewModel.previous() },
                         onSeek = { if (activeChannelId == musicState.activeChannel?.id) viewModel.seekTo(it) },
+                        onPlayFileIndex = { index -> 
+                            viewModel.playFileAtIndex(index)
+                            showFileBrowser = false
+                        },
+                        onToggleFileBrowser = { showFileBrowser = !showFileBrowser },
                         onToggleShuffle = { viewModel.toggleShuffle() },
                         onToggleRepeat = { viewModel.toggleRepeat() }
                     )
@@ -549,11 +556,23 @@ fun PlayerScreen(
             onLaunch = { viewModel.launchApp(it); showAppDrawer = false },
             onDismiss = { showAppDrawer = false }
         )
+
+        if (showFileBrowser && musicState.activeChannel != null) {
+            FileBrowserDialog(
+                files = musicState.audioFiles,
+                currentTrackIndex = if (activeChannelId == musicState.activeChannel?.id) musicState.currentTrackIndex else -1,
+                onSelect = { index -> 
+                    viewModel.playFileAtIndex(index)
+                    showFileBrowser = false
+                },
+                onDismiss = { showFileBrowser = false }
+            )
+        }
     }
 }
 
 @Composable
-fun MusicDashboard(channels: List<AudioChannel>, isLoading: Boolean, activeChannelId: Int?, isPlaying: Boolean, currentPositionMs: Long, currentDurationMs: Long, isPlayerVisible: Boolean, activeChannel: AudioChannel?, audioFiles: List<com.michael.simplemusic.scanner.AudioFile>, currentTrackName: String, currentTrackArtist: String?, currentTrackAlbum: String?, currentTrackIndex: Int, onChannelClick: (Int) -> Unit, onDeleteChannel: (Int) -> Unit, onRenameChannel: (Int, String) -> Unit, onCreateChannel: () -> Unit, onFolderPick: () -> Unit, onPlayPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit, onToggleShuffle: () -> Unit, onToggleRepeat: () -> Unit) {
+fun MusicDashboard(channels: List<AudioChannel>, isLoading: Boolean, activeChannelId: Int?, isPlaying: Boolean, currentPositionMs: Long, currentDurationMs: Long, isPlayerVisible: Boolean, activeChannel: AudioChannel?, audioFiles: List<com.michael.simplemusic.scanner.AudioFile>, currentTrackName: String, currentTrackArtist: String?, currentTrackAlbum: String?, currentTrackIndex: Int, onChannelClick: (Int) -> Unit, onDeleteChannel: (Int) -> Unit, onRenameChannel: (Int, String) -> Unit, onCreateChannel: () -> Unit, onFolderPick: () -> Unit, onPlayFileIndex: (Int) -> Unit, onToggleFileBrowser: () -> Unit, onPlayPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit, onToggleShuffle: () -> Unit, onToggleRepeat: () -> Unit) {
     if (isLoading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
@@ -561,7 +580,7 @@ fun MusicDashboard(channels: List<AudioChannel>, isLoading: Boolean, activeChann
         }
     } else if (isPlayerVisible && activeChannel != null) {
         Box(modifier = Modifier.padding(16.dp)) {
-            FolderPlayer(activeChannel, audioFiles, isPlaying && activeChannelId == activeChannel.id, if (activeChannelId == activeChannel.id) currentTrackName else activeChannel.currentTrackTitle ?: "", if (activeChannelId == activeChannel.id) currentTrackArtist else activeChannel.currentTrackArtist, if (activeChannelId == activeChannel.id) currentTrackAlbum else activeChannel.currentTrackAlbum, currentTrackIndex, if (activeChannelId == activeChannel.id) currentPositionMs else activeChannel.currentPositionMs, if (activeChannelId == activeChannel.id) currentDurationMs else activeChannel.currentTrackDurationMs, false, true, onFolderPick, onPlayPause, onNext, onPrevious, onSeek, onToggleShuffle, onToggleRepeat)
+            FolderPlayer(activeChannel, audioFiles, isPlaying && activeChannelId == activeChannel.id, if (activeChannelId == activeChannel.id) currentTrackName else activeChannel.currentTrackTitle ?: "", if (activeChannelId == activeChannel.id) currentTrackArtist else activeChannel.currentTrackArtist, if (activeChannelId == activeChannel.id) currentTrackAlbum else activeChannel.currentTrackAlbum, currentTrackIndex, if (activeChannelId == activeChannel.id) currentPositionMs else activeChannel.currentPositionMs, if (activeChannelId == activeChannel.id) currentDurationMs else activeChannel.currentTrackDurationMs, false, true, onFolderPick, onToggleFileBrowser, onPlayPause, onNext, onPrevious, onSeek, onToggleShuffle, onToggleRepeat)
         }
     } else if (channels.isEmpty()) {
         EmptyState("No music decks yet", Icons.Default.LibraryMusic, onCreateChannel)
@@ -789,14 +808,16 @@ fun RadioSearchDialog(results: List<com.michael.simplemusic.ui.RadioStationResul
 }
 
 @Composable
-fun FolderPlayer(activeChannel: AudioChannel, audioFiles: List<com.michael.simplemusic.scanner.AudioFile>, isPlaying: Boolean, currentTrackName: String, currentTrackArtist: String?, currentTrackAlbum: String?, currentTrackIndex: Int, currentPositionMs: Long, durationMs: Long, shuffleEnabled: Boolean, repeatEnabled: Boolean, onFolderPick: () -> Unit, onPlayPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit, onToggleShuffle: () -> Unit, onToggleRepeat: () -> Unit) {
+fun FolderPlayer(activeChannel: AudioChannel, audioFiles: List<com.michael.simplemusic.scanner.AudioFile>, isPlaying: Boolean, currentTrackName: String, currentTrackArtist: String?, currentTrackAlbum: String?, currentTrackIndex: Int, currentPositionMs: Long, durationMs: Long, shuffleEnabled: Boolean, repeatEnabled: Boolean, onFolderPick: () -> Unit, onToggleFileBrowser: () -> Unit, onPlayPause: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit, onToggleShuffle: () -> Unit, onToggleRepeat: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxSize()) {
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surfaceVariant)) {
             Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
-                Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                    Text(activeChannel.folderDisplayName ?: "No folder", style = MaterialTheme.typography.bodyLarge, maxLines = 1)
-                    if (audioFiles.isNotEmpty()) Text("${audioFiles.size} tracks", style = MaterialTheme.typography.bodySmall)
+                Row(modifier = Modifier.weight(1f).clickable { onToggleFileBrowser() }, verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
+                    Column(modifier = Modifier.padding(start = 12.dp)) {
+                        Text(activeChannel.folderDisplayName ?: "No folder", style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                        if (audioFiles.isNotEmpty()) Text("${audioFiles.size} tracks", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
                 FilledTonalButton(onClick = onFolderPick) { Text("Change") }
             }
@@ -1417,6 +1438,69 @@ fun AppDrawerDialog(
                     }
                 }
             }
+        }
+    )
+}
+
+@Composable
+fun FileBrowserDialog(
+    files: List<com.michael.simplemusic.scanner.AudioFile>,
+    currentTrackIndex: Int,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Select Track") },
+        text = {
+            if (files.isEmpty()) {
+                Text("No tracks found in this folder.")
+            } else {
+                LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
+                    itemsIndexed(files) { index, file ->
+                        val isSelected = index == currentTrackIndex
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelect(index) }
+                                .padding(vertical = 12.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                if (isSelected) Icons.Default.PlayArrow else Icons.Default.MusicNote,
+                                contentDescription = null,
+                                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = file.title ?: file.displayName.removeSuffix(".mp3"),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (!file.artist.isNullOrBlank()) {
+                                    Text(
+                                        text = file.artist!!,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                        if (index < files.size - 1) {
+                            HorizontalDivider(modifier = Modifier.alpha(0.5f))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
         }
     )
 }

@@ -30,7 +30,7 @@ For every completed item, ensure:
 
 ### Podcast module
 
-- [x] Download new episodes button in Recent tab, should fetch new episodes for all channels and save them to the local storage. This is not working now. Lets instead of the button, use pulldown to refresh gesture for the Recent tab as well as in the episode list of a show.
+- [ ]
 - [ ]
 
 ### Common module
@@ -47,9 +47,11 @@ For every completed item, ensure:
 
 ### Music module
 
+- [x] Use can currently change the Folder by pressing the 'change folder' button on the top bar. Add an option that when the user clicks on the current folder (left side) it opens the current folder and user can select a file to start playing, and then the player will play the file and all subsequent files in the folder.
+
 ### Podcast module
 
-- [x] Add an icon to only shows in progress (played at least 10 seconds) or show the whole list.
+- [x] The 'now playing' screen must have a back button
 
 ### Common module
 

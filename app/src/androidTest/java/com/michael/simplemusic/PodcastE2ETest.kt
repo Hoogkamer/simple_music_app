@@ -30,10 +30,10 @@ class PodcastE2ETest {
 
         // 3. Find an episode and click it to go to detail
         // We look for any node with "Available" or "Played" which are markers in EpisodeListItem
-        val episodeNode = composeTestRule.onAllNodesWithText("Available").onFirst()
+        val episodeNodes = composeTestRule.onAllNodesWithText("Available")
         
-        if (episodeNode.isRoot().not()) { // If we have episodes
-            episodeNode.performClick()
+        if (episodeNodes.fetchSemanticsNodes().isNotEmpty()) { // If we have episodes
+            episodeNodes.onFirst().performClick()
 
             // 4. Verify we are in Episode Detail screen
             composeTestRule.onNodeWithText("Episode Detail").assertExists()

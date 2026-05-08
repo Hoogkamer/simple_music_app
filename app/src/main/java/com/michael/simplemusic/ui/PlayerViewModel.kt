@@ -530,6 +530,16 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun previous() = mediaController?.seekToPrevious()
     fun seekTo(pos: Long) = mediaController?.seekTo(pos)
     
+    fun playFileAtIndex(index: Int) {
+        mediaController?.let {
+            if (index in 0 until it.mediaItemCount) {
+                it.seekTo(index, 0L)
+                it.play()
+            }
+        }
+    }
+
+    
     fun toggleShuffle() { 
         mediaController?.let { 
             it.shuffleModeEnabled = !it.shuffleModeEnabled 
